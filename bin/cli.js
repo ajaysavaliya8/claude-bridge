@@ -48,6 +48,10 @@ function die(msg) {
 }
 
 function port(value, flag) {
+  // No default by design: the port must be set explicitly for both ask and answer.
+  if (value === undefined || value === true || value === "") {
+    die(`${flag} is required — set a port explicitly (there is no default)`);
+  }
   const n = Number(value);
   if (!Number.isInteger(n) || n < 1 || n > 65535) die(`${flag} must be a port 1-65535, got "${value}"`);
   return n;
@@ -57,7 +61,7 @@ const HELP = `claude-bridge-peer <answer|ask> [options]
 
 answer  (HTTP daemon — answers the partner, runs the local claude CLI)
   --project PATH       project this peer answers about (or env PROJECT_DIR)  [required]
-  --current-port N     port to listen on (or CURRENT_PORT; default 8082)
+  --current-port N     port to listen on (or CURRENT_PORT)  [required, no default]
   --name NAME          this peer's name (or PEER_SELF; default "peer")
   --chat-id ID         resume this Claude conversation when answering
   --claude-bin PATH    claude CLI (or CLAUDE_BIN; default "claude")
@@ -65,7 +69,7 @@ answer  (HTTP daemon — answers the partner, runs the local claude CLI)
   --max-turns N        (default 15)        --timeout SEC  per-answer cap (default 240)
 
 ask  (stdio MCP — gives an interactive Claude the bridge tools)
-  --partner-port N     partner's port (or PARTNER_PORT; default 8081)
+  --partner-port N     partner's port (or PARTNER_PORT)  [required, no default]
   --partner-host HOST  partner host (default 127.0.0.1; use the SSH tunnel)
   --name NAME          this peer's name (or PEER_SELF; default "peer")
   --partner-name NAME  partner's name (or DEFAULT_TARGET; default "partner")`;
@@ -98,14 +102,14 @@ async function main() {
       timeoutSec: parseInt(args.timeout || env("CLAUDE_TIMEOUT_SECONDS", "240"), 10),
       sessionFile,
     });
-    const currentPort = port(args["current-port"] ?? env("CURRENT_PORT", "8082"), "--current-port");
+    const currentPort = port(args["current-port"] ?? env("CURRENT_PORT"), "--current-port");
     startAnswerServer({ engine, port: currentPort, name });
     return;
   }
 
   if (mode === "ask") {
     const host = args["partner-host"] || "127.0.0.1";
-    const partnerUrl = `http://${host}:${port(args["partner-port"] ?? env("PARTNER_PORT", "8081"), "--partner-port")}`;
+    const partnerUrl = `http://${host}:${port(args["partner-port"] ?? env("PARTNER_PORT"), "--partner-port")}`;
     const partnerName = args["partner-name"] || env("DEFAULT_TARGET", "partner");
     const askTimeoutMs = (parseInt(env("ASK_TIMEOUT_SECONDS", "300"), 10) + 60) * 1000;
     await startAskServer({ name, partnerName, partnerUrl, askTimeoutMs });

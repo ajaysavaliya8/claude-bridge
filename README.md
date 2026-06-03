@@ -75,9 +75,10 @@ with no manual `claude mcp add` — from the Claude Code chat:
 ```
 
 (or in a terminal: `claude plugin marketplace add ajaysavaliya8/claude-bridge && claude plugin install claude-bridge@claude-bridge`). Enabling the plugin auto-registers
-the `bridge` tools — it runs the `ask` client via `npx` (default partner port
-**8081**). You still run one **answer daemon** per project (a plugin can't host a
-long-running process):
+the `bridge` tools — it runs the `ask` client via `npx`. You **must set the
+partner port** when enabling the plugin (a required config field — no default, so
+it won't connect until set). You still run one **answer daemon** per project (a
+plugin can't host a long-running process), with an explicit `--current-port`:
 
 ```bash
 claude-bridge-peer answer --project /path --current-port 8082
@@ -113,9 +114,9 @@ act as *optional* fallbacks (they must be exported in the shell — there is no
 `CLAUDE_TIMEOUT_SECONDS`, `BRIDGE_SESSION_DIR`.
 
 ```
-answer  --project PATH  [--current-port 8082]  [--name N] [--chat-id ID]
+answer  --project PATH  --current-port N  [--name N] [--chat-id ID]
         [--claude-bin PATH] [--allowed-tools "Read,Grep,Glob"] [--max-turns 15] [--timeout 240]
-ask     [--partner-port 8081]  [--partner-host 127.0.0.1] [--name N] [--partner-name N]
+ask     --partner-port N  [--partner-host 127.0.0.1] [--name N] [--partner-name N]
 ```
 
 `--chat-id` resumes a specific Claude conversation when answering, so context
@@ -133,9 +134,10 @@ launch it, not in the UI:
 - **ask client** — `--partner-port` in its registration: either the
   `claude mcp add … ask --partner-port N` arguments, or a `.mcp.json` entry.
 
-Ports **default to `8082`** (answer's `--current-port`) and **`8081`** (ask's
-`--partner-port`) — pass the flags only to override (or set `CURRENT_PORT` /
-`PARTNER_PORT`).
+**Ports are required — there is no default.** Set `--current-port` (answer) and
+`--partner-port` (ask) explicitly, or via `CURRENT_PORT` / `PARTNER_PORT`. A peer
+**refuses to start** without its port. The plugin prompts for the partner port
+when you enable it (a required config field), so it won't connect until you set it.
 
 To change the ask client's port, edit its `.mcp.json` (the port is a plain,
 editable value) and click **Reconnect** in the MCP panel — or re-run
