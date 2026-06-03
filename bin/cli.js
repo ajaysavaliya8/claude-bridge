@@ -13,7 +13,7 @@
 //
 //   // .mcp.json (Claude Code auto-spawns the ask client via npx — one-line attach):
 //   { "mcpServers": { "bridge": {
-//       "command": "npx", "args": ["-y", "claude-bridge-peer", "ask", "--partner-port", "8082"] } } }
+//       "command": "npx", "args": ["-y", "github:ajaysavaliya8/claude-bridge", "ask", "--partner-port", "8082"] } } }
 
 import { homedir } from "node:os";
 import { join } from "node:path";

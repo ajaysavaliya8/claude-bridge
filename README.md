@@ -45,7 +45,10 @@ LOCAL — peer "frontend"                       VPS — peer "backend"
 ## Install
 
 ```bash
-npm install            # or: npm install -g claude-bridge-peer  (once published)
+# install the CLI globally from GitHub (not yet published to npm):
+npm install -g github:ajaysavaliya8/claude-bridge
+# …or, working in a clone, just install deps:
+npm install
 ```
 
 Requires **Node ≥ 18** and the **`claude` CLI** installed + authenticated on any
@@ -60,7 +63,7 @@ it; restart the session and the tools appear:
 
 ```jsonc
 { "mcpServers": { "bridge": {
-    "command": "npx", "args": ["-y", "claude-bridge-peer", "ask", "--partner-port", "8082"]
+    "command": "npx", "args": ["-y", "github:ajaysavaliya8/claude-bridge", "ask", "--partner-port", "8082"]
 } } }
 ```
 
@@ -146,7 +149,7 @@ editable value) and click **Reconnect** in the MCP panel — or re-run
 ```jsonc
 // .mcp.json — edit "8082", save, then hit Reconnect
 { "mcpServers": { "bridge": {
-    "command": "npx", "args": ["-y", "claude-bridge-peer", "ask", "--partner-port", "8082"]
+    "command": "npx", "args": ["-y", "github:ajaysavaliya8/claude-bridge", "ask", "--partner-port", "8082"]
 } } }
 ```
 
