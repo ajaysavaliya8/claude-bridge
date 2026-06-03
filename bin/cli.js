@@ -22,6 +22,7 @@ import { statSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { AnswerEngine } from "../src/answerEngine.js";
 import { startAnswerServer } from "../src/answerServer.js";
 import { startAskServer } from "../src/askServer.js";
+import { startRelayServer } from "../src/relayServer.js";
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -72,7 +73,18 @@ ask  (stdio MCP — gives an interactive Claude the bridge tools)
   --partner-port N     partner's port (or PARTNER_PORT)  [required, no default]
   --partner-host HOST  partner host (default 127.0.0.1; use the SSH tunnel)
   --name NAME          this peer's name (or PEER_SELF; default "peer")
-  --partner-name NAME  partner's name (or DEFAULT_TARGET; default "partner")`;
+  --partner-name NAME  partner's name (or DEFAULT_TARGET; default "partner")
+  --relay-port N       your local relay's port (or RELAY_PORT) — enables in-chat
+                       answering tools (incoming_questions / answer_incoming)
+
+relay  (in-chat answering inbox — queues incoming questions for this session)
+  --current-port N     port to listen on (or CURRENT_PORT)  [required, no default]
+  --name NAME          this peer's name (or PEER_SELF; default "peer")
+  --hold SEC           how long to hold an unanswered question (default 1800)
+
+Answering modes (pick one per peer): 'answer' = instant headless; 'relay' = your
+interactive Claude pulls + answers in its own chat (run 'relay' AND register the
+ask client with --relay-port). For two-way, run the same combo on both peers.`;
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -112,11 +124,28 @@ async function main() {
     const partnerUrl = `http://${host}:${port(args["partner-port"] ?? env("PARTNER_PORT"), "--partner-port")}`;
     const partnerName = args["partner-name"] || env("DEFAULT_TARGET", "partner");
     const askTimeoutMs = (parseInt(env("ASK_TIMEOUT_SECONDS", "300"), 10) + 60) * 1000;
-    await startAskServer({ name, partnerName, partnerUrl, askTimeoutMs });
+    // Optional: a local relay enables in-chat answering (incoming_questions /
+    // answer_incoming). It's optional, so unset / empty / an unsubstituted plugin
+    // placeholder just disables those tools rather than erroring.
+    let relayUrl = null;
+    const relayPortArg = args["relay-port"] ?? env("RELAY_PORT");
+    if (relayPortArg !== undefined && relayPortArg !== true && relayPortArg !== "" && !String(relayPortArg).includes("${")) {
+      relayUrl = `http://127.0.0.1:${port(relayPortArg, "--relay-port")}`;
+    }
+    await startAskServer({ name, partnerName, partnerUrl, askTimeoutMs, relayUrl });
     return;
   }
 
-  die(`unknown mode '${mode}' (expected 'answer' or 'ask')`);
+  if (mode === "relay") {
+    // In-chat answering inbox: queues incoming questions for this peer's interactive
+    // Claude to pull + answer (via the ask client's --relay-port tools).
+    const relayPort = port(args["current-port"] ?? env("CURRENT_PORT"), "--current-port");
+    const holdSeconds = parseInt(args.hold || env("RELAY_HOLD_SECONDS", "1800"), 10);
+    startRelayServer({ port: relayPort, name, holdSeconds });
+    return;
+  }
+
+  die(`unknown mode '${mode}' (expected 'answer', 'ask', or 'relay')`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

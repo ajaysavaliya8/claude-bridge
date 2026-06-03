@@ -26,7 +26,7 @@ async function postJson(url, payload, timeoutMs) {
 
 const text = (s) => ({ content: [{ type: "text", text: s }] });
 
-export async function startAskServer({ name, partnerName, partnerUrl, askTimeoutMs }) {
+export async function startAskServer({ name, partnerName, partnerUrl, askTimeoutMs, relayUrl }) {
   const server = new McpServer({ name: `bridge:${name}`, version: "0.1.0" });
 
   server.registerTool(
@@ -102,6 +102,58 @@ export async function startAskServer({ name, partnerName, partnerUrl, askTimeout
     async () => text(`You are '${name}'. Partner '${partnerName}' at ${partnerUrl} (use peer_status for liveness).`),
   );
 
+  // In-chat answering: when a local relay is configured, expose tools so THIS
+  // session can pull questions other peers asked it and answer them in-chat.
+  if (relayUrl) {
+    server.registerTool(
+      "incoming_questions",
+      {
+        description:
+          "List questions other peers have asked YOU that are waiting for an answer. Call this (e.g. when the user " +
+          "says to check peer questions), then answer each one accurately from THIS project's real code via answer_incoming.",
+        inputSchema: {},
+      },
+      async () => {
+        try {
+          const ctrl = new AbortController();
+          const t = setTimeout(() => ctrl.abort(), 5000);
+          const resp = await fetch(`${relayUrl}/pending`, { signal: ctrl.signal });
+          clearTimeout(t);
+          const data = await resp.json();
+          if (!data.questions || data.questions.length === 0) return text("No pending questions.");
+          return text(
+            data.questions.map((q) => `[${q.id}] from "${q.sender}":\n${q.question}`).join("\n\n") +
+              `\n\nAnswer each with answer_incoming(id, answer).`,
+          );
+        } catch (e) {
+          return text(`Error reaching local relay at ${relayUrl} (${e.message}). Is the relay daemon running?`);
+        }
+      },
+    );
+
+    server.registerTool(
+      "answer_incoming",
+      {
+        description:
+          "Send your answer to a pending incoming question (get its id from incoming_questions). The answer is " +
+          "returned to the peer that asked. Answer accurately and authoritatively from THIS project's real code.",
+        inputSchema: { id: z.string(), answer: z.string() },
+      },
+      async ({ id, answer }) => {
+        try {
+          const r = await postJson(`${relayUrl}/answer`, { id, answer }, 10_000);
+          if (r.status !== 200) return text(`Error sending answer (HTTP ${r.status}): ${r.text.slice(0, 300)}`);
+          return text(`Answer for ${id} delivered to the asker.`);
+        } catch (e) {
+          return text(`Error reaching local relay at ${relayUrl} (${e.message}).`);
+        }
+      },
+    );
+  }
+
   await server.connect(new StdioServerTransport());
-  console.error(`[claude-bridge] ask MCP (stdio) for '${name}' -> partner '${partnerName}' at ${partnerUrl}`);
+  console.error(
+    `[claude-bridge] ask MCP (stdio) for '${name}' -> partner '${partnerName}' at ${partnerUrl}` +
+      (relayUrl ? ` | answering incoming via relay ${relayUrl}` : ""),
+  );
 }

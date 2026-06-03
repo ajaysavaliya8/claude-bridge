@@ -108,6 +108,34 @@ ssh -N -L 8082:127.0.0.1:8082 -R 8081:127.0.0.1:8081 <vps-user>@<vps-host>
 
 ---
 
+## Answering modes — headless vs. in-chat
+
+Each peer chooses how it answers the *other* peer's questions:
+
+- **`answer` (headless, instant):** runs `claude` automatically; the asker gets a
+  reply in seconds, no human involved. The exchange shows only in the daemon log.
+- **`relay` (in-chat, visible):** queues each incoming question so **this peer's
+  interactive Claude** answers it *in its own chat* — it calls `incoming_questions`,
+  then `answer_incoming(id, answer)`, and the reply flows back to the asker.
+  Visible/auditable on the answering side; the asker waits until you answer.
+
+### Two-way in-chat (A ⇆ B)
+Run the **same combo** on both peers — a relay (your inbox) plus an ask client
+pointed at the partner *and* at your own relay:
+
+```bash
+# peer B on 8082 (partner A is on 8081):
+claude-bridge-peer relay --current-port 8082 --name B
+claude mcp add bridge -- claude-bridge-peer ask --partner-port 8081 --relay-port 8082 --name B --partner-name A
+
+# peer A is the mirror image: relay --current-port 8081, ask --partner-port 8082 --relay-port 8081
+```
+
+Now each side sees the other's questions in its own chat and answers them there.
+Say e.g. *"check peer questions"* in your session → Claude calls
+`incoming_questions` and answers each with `answer_incoming`. Raise
+`ASK_TIMEOUT_SECONDS` on the asker if answers take a while (a human is in the loop).
+
 ## Configuration
 
 **No config file is required.** Everything is a flag. A few environment variables

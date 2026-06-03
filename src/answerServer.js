@@ -3,25 +3,7 @@
 
 import http from "node:http";
 
-function readBody(req, limitBytes = 1_000_000) {
-  return new Promise((resolve, reject) => {
-    let size = 0;
-    const chunks = [];
-    req.on("data", (c) => {
-      size += c.length;
-      if (size > limitBytes) { reject(new Error("request too large")); req.destroy(); return; }
-      chunks.push(c);
-    });
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    req.on("error", reject);
-  });
-}
-
-function send(res, code, obj) {
-  const body = JSON.stringify(obj);
-  res.writeHead(code, { "content-type": "application/json" });
-  res.end(body);
-}
+import { readBody, send } from "./http.js";
 
 export function startAnswerServer({ engine, port, name }) {
   const server = http.createServer(async (req, res) => {

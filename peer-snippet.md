@@ -25,6 +25,14 @@ authoritative and make your code match it.
   on it.
 - `list_peers()` — show who you can talk to (yourself and the partner).
 
+If in-chat answering is enabled (the `incoming_questions` / `answer_incoming` tools
+are present), you are also the one who answers the partner's questions:
+
+- `incoming_questions()` — list questions the partner has asked YOU that are
+  waiting. Check this when the user says "check peer questions" (or periodically).
+- `answer_incoming(id, answer)` — answer one of them from THIS project's real code;
+  the reply goes back to the asker. Be precise and authoritative.
+
 Good habit: before implementing anything against the other peer's contract, ask
 first, then code to the answer. A 10-second question prevents a class of
 integration bugs (wrong field names, wrong casing, wrong response shape).
