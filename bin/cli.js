@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// claude-bridge-peer — let two Claude Code sessions talk. Two modes:
+// claude-bridge — let two Claude Code sessions talk. Two modes:
 //
 //   answer  long-running HTTP daemon that answers the partner's questions by
 //           running the local `claude` CLI read-only in a project (no API key).
@@ -8,8 +8,8 @@
 //           via npx in a .mcp.json entry). It POSTs questions to the partner.
 //
 // Examples:
-//   claude-bridge-peer answer --project /path/to/backend --current-port 8082 --name backend
-//   claude-bridge-peer ask --partner-port 8082 --name frontend --partner-name backend
+//   claude-bridge answer --project /path/to/backend --current-port 8082 --name backend
+//   claude-bridge ask --partner-port 8082 --name frontend --partner-name backend
 //
 //   // .mcp.json (Claude Code auto-spawns the ask client via npx — one-line attach):
 //   { "mcpServers": { "bridge": {
@@ -58,7 +58,7 @@ function port(value, flag) {
   return n;
 }
 
-const HELP = `claude-bridge-peer <answer|ask> [options]
+const HELP = `claude-bridge <answer|ask> [options]
 
 answer  (HTTP daemon — answers the partner, runs the local claude CLI)
   --project PATH       project this peer answers about (or env PROJECT_DIR)  [required]

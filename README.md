@@ -1,4 +1,4 @@
-# claude-bridge-peer
+# claude-bridge
 
 **Let two Claude Code sessions talk to each other.** A lightweight, self-hostable
 peer process per project: its interactive Claude can `ask_peer(...)` the other
@@ -84,17 +84,17 @@ it won't connect until set). You still run one **answer daemon** per project (a
 plugin can't host a long-running process), with an explicit `--current-port`:
 
 ```bash
-claude-bridge-peer answer --project /path --current-port 8082
+claude-bridge answer --project /path --current-port 8082
 ```
 
 ## Run a peer
 
 ```bash
 # answers about this project, on port 8082
-claude-bridge-peer answer --project /path/to/backend --current-port 8082 --name backend
+claude-bridge answer --project /path/to/backend --current-port 8082 --name backend
 
 # (the partner does the mirror image on its own machine/port)
-claude-bridge-peer answer --project /path/to/frontend --current-port 8081 --name frontend
+claude-bridge answer --project /path/to/frontend --current-port 8081 --name frontend
 ```
 
 **Same machine:** that's it — two ports. **Across machines:** open one SSH tunnel
@@ -125,8 +125,8 @@ pointed at the partner *and* at your own relay:
 
 ```bash
 # peer B on 8082 (partner A is on 8081):
-claude-bridge-peer relay --current-port 8082 --name B
-claude mcp add bridge -- claude-bridge-peer ask --partner-port 8081 --relay-port 8082 --name B --partner-name A
+claude-bridge relay --current-port 8082 --name B
+claude mcp add bridge -- claude-bridge ask --partner-port 8081 --relay-port 8082 --name B --partner-name A
 
 # peer A is the mirror image: relay --current-port 8081, ask --partner-port 8082 --relay-port 8081
 ```
