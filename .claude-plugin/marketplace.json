@@ -1,0 +1,12 @@
+{
+  "name": "claude-bridge",
+  "description": "claude-bridge: let separate Claude Code sessions ask each other authoritative questions about their own projects.",
+  "owner": { "name": "Ajaykumar Savaliya" },
+  "plugins": [
+    {
+      "name": "claude-bridge",
+      "source": "./",
+      "description": "ask_peer / tell_peer / peer_status / list_peers — let this project's Claude Code session talk to another project's. Installs the 'bridge' MCP tools (via npx). Pair with a running 'claude-bridge-peer answer' daemon so the other side can reply."
+    }
+  ]
+}

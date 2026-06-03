@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "claude-bridge",
+  "version": "0.1.0",
+  "description": "Two-way Q&A between separate Claude Code sessions: ask_peer the other project and get answers read from its real source. No API key.",
+  "author": { "name": "Ajaykumar Savaliya" },
+  "mcpServers": {
+    "bridge": {
+      "command": "npx",
+      "args": ["-y", "github:ajaysavaliya8/claude-bridge", "ask"]
+    }
+  }
+}

@@ -64,6 +64,25 @@ it; restart the session and the tools appear:
 } } }
 ```
 
+## Install as a Claude Code plugin (auto-registers the tools)
+
+The repo doubles as a plugin **marketplace**, so you can attach the `ask` tools
+with no manual `claude mcp add` — from the Claude Code chat:
+
+```text
+/plugin marketplace add ajaysavaliya8/claude-bridge
+/plugin install claude-bridge@claude-bridge
+```
+
+(or in a terminal: `claude plugin marketplace add ajaysavaliya8/claude-bridge && claude plugin install claude-bridge@claude-bridge`). Enabling the plugin auto-registers
+the `bridge` tools — it runs the `ask` client via `npx` (default partner port
+**8081**). You still run one **answer daemon** per project (a plugin can't host a
+long-running process):
+
+```bash
+claude-bridge-peer answer --project /path --current-port 8082
+```
+
 ## Run a peer
 
 ```bash
