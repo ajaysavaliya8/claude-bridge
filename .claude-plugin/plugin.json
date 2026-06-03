@@ -1,13 +1,40 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "claude-bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Two-way Q&A between separate Claude Code sessions: ask_peer the other project and get answers read from its real source. No API key.",
   "author": { "name": "Ajaykumar Savaliya" },
+  "userConfig": {
+    "partner_port": {
+      "type": "number",
+      "title": "Partner port",
+      "description": "The port the partner peer's answer daemon listens on (the peer you ask).",
+      "default": 8081,
+      "min": 1,
+      "max": 65535
+    },
+    "name": {
+      "type": "string",
+      "title": "This peer's name",
+      "description": "Label for this side, e.g. backend.",
+      "default": "peer"
+    },
+    "partner_name": {
+      "type": "string",
+      "title": "Partner's name",
+      "description": "Label for the peer you talk to, e.g. frontend.",
+      "default": "partner"
+    }
+  },
   "mcpServers": {
     "bridge": {
       "command": "npx",
-      "args": ["-y", "github:ajaysavaliya8/claude-bridge", "ask"]
+      "args": [
+        "-y", "github:ajaysavaliya8/claude-bridge", "ask",
+        "--partner-port", "${user_config.partner_port}",
+        "--name", "${user_config.name}",
+        "--partner-name", "${user_config.partner_name}"
+      ]
     }
   }
 }
