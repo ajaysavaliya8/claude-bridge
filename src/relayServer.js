@@ -96,6 +96,11 @@ export function startRelayServer({ port, name, holdSeconds = 1800 }) {
 
   server.requestTimeout = 0;   // questions wait for a human; never cut the held /ask
   server.headersTimeout = 0;
+  server.on("error", (e) => {
+    if (e.code === "EADDRINUSE") console.error(`[claude-bridge] port ${port} is already in use — stop what's using it, or pick another --current-port.`);
+    else console.error(`[claude-bridge] server error: ${e.message}`);
+    process.exit(1);
+  });
   server.listen(port, "127.0.0.1", () => {
     console.error(`[claude-bridge] relay '${name}' on 127.0.0.1:${port} — incoming questions are answered in this peer's chat`);
   });

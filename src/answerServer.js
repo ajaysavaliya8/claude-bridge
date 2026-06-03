@@ -62,6 +62,11 @@ export function startAnswerServer({ engine, port, name }) {
   // Node's default request timeout (5 min) cut a long answer short.
   server.requestTimeout = 0;
   server.headersTimeout = 0;
+  server.on("error", (e) => {
+    if (e.code === "EADDRINUSE") console.error(`[claude-bridge] port ${port} is already in use — stop what's using it, or pick another --current-port.`);
+    else console.error(`[claude-bridge] server error: ${e.message}`);
+    process.exit(1);
+  });
 
   server.listen(port, "127.0.0.1", () => {
     console.error(`[claude-bridge] answer daemon '${name}' on 127.0.0.1:${port} (project: ${engine.projectDir})`);
