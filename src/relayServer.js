@@ -2,15 +2,19 @@
 // each incoming question and holds the asker's HTTP request open until this peer's
 // interactive Claude answers it (via the incoming_questions / answer_incoming MCP
 // tools). That makes the Q&A visible in this peer's own chat. One per peer — run
-// it on both sides for fully two-way in-chat answering.
+// it on both sides for fully two-way in-chat answering. Attached images are saved
+// to disk so the answering Claude can Read them.
 
 import http from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { readBody, send } from "./http.js";
+import { saveImages, MAX_PAYLOAD_BYTES } from "./images.js";
 
 export function startRelayServer({ port, name, holdSeconds = 1800 }) {
-  // id -> { id, sender, question, ts, res, timer }. `res` is the asker's held
-  // response, completed when /answer arrives (or timed out).
+  // id -> { id, sender, question, imagePaths, ts, res, timer }. `res` is the
+  // asker's held response, completed when /answer arrives (or it times out).
   const pending = new Map();
   let seq = 0;
 
@@ -24,26 +28,42 @@ export function startRelayServer({ port, name, holdSeconds = 1800 }) {
     // From the partner's ask client: enqueue and HOLD open until answered.
     if (req.method === "POST" && url === "/ask") {
       let body;
-      try { body = JSON.parse(await readBody(req)); }
+      try { body = JSON.parse(await readBody(req, MAX_PAYLOAD_BYTES)); }
       catch { return send(res, 400, { answer: "bad request: invalid JSON", is_error: true }); }
       const question = String(body.question || "").trim();
       const sender = String(body.sender || "peer") || "peer";
       if (!question) return send(res, 400, { answer: "bad request: empty question", is_error: true });
 
       const id = `q${++seq}`;
+      const imagePaths = saveImages(body.images, join(tmpdir(), "claude-bridge", name, id));
       const timer = setTimeout(() => {
         if (pending.delete(id)) {
           send(res, 200, { answer: `(no answer from '${name}' within ${holdSeconds}s)`, is_error: true, meta: { id, timed_out: true } });
         }
       }, holdSeconds * 1000);
-      pending.set(id, { id, sender, question, ts: Date.now(), res, timer });
-      console.error(`[relay] queued ${id} from '${sender}' (${question.length} chars) — ${pending.size} pending`);
+      pending.set(id, { id, sender, question, imagePaths, ts: Date.now(), res, timer });
+      const imgNote = imagePaths.length ? `, ${imagePaths.length} image(s)` : "";
+      console.error(`[relay] queued ${id} from '${sender}' (${question.length} chars${imgNote}) — ${pending.size} pending`);
       return; // held open; resolved by /answer or the timer
+    }
+
+    // One-way note (fire-and-forget) — logged for visibility, not queued for reply.
+    if (req.method === "POST" && url === "/tell") {
+      let body;
+      try { body = JSON.parse(await readBody(req, MAX_PAYLOAD_BYTES)); }
+      catch { return send(res, 400, { ok: false }); }
+      const sender = String(body.sender || "peer") || "peer";
+      const message = String(body.message || "").trim();
+      const imgs = saveImages(body.images, join(tmpdir(), "claude-bridge", name, `note${++seq}`));
+      console.error(`[relay] note from '${sender}': ${message.slice(0, 200)}${imgs.length ? ` (+${imgs.length} image(s): ${imgs.join(", ")})` : ""}`);
+      return send(res, 202, { ok: true });
     }
 
     // For this peer's interactive Claude (via MCP tools):
     if (req.method === "GET" && url === "/pending") {
-      const questions = [...pending.values()].map((e) => ({ id: e.id, sender: e.sender, question: e.question, ts: e.ts }));
+      const questions = [...pending.values()].map((e) => ({
+        id: e.id, sender: e.sender, question: e.question, images: e.imagePaths || [], ts: e.ts,
+      }));
       return send(res, 200, { questions });
     }
 

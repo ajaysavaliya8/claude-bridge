@@ -102,9 +102,13 @@ export class AnswerEngine {
     }
   }
 
-  async answer(sender, question) {
+  async answer(sender, question, imagePaths = []) {
+    let prompt = buildQuestionPrompt(sender, question);
+    if (imagePaths && imagePaths.length) {
+      prompt += `\n\nThe peer attached image file(s) at these local paths — use the Read tool to view them, then factor them into your answer:\n${imagePaths.map((p) => `- ${p}`).join("\n")}`;
+    }
     try {
-      const data = await this._sessionTurn(buildQuestionPrompt(sender, question));
+      const data = await this._sessionTurn(prompt);
       return {
         answer: String(data.result || "").trim() || "(empty answer)",
         is_error: false,

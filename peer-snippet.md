@@ -17,10 +17,11 @@ infer it from this project's code. Ask the owning peer with `ask_peer`.** The
 answer comes from a process with read access to that project, so treat it as
 authoritative and make your code match it.
 
-- `ask_peer(question, target=None)` — ask and block for a direct answer. Be
-  specific. Quote the exact symbol/endpoint you're unsure about.
-- `tell_peer(message, target=None)` — send a one-way heads-up (e.g. "I renamed
-  this field") with no answer expected.
+- `ask_peer(question, target=None, image_paths=[])` — ask and block for a direct
+  answer. Be specific. Attach screenshots/diagrams via `image_paths` (local file
+  paths) — the peer genuinely sees them.
+- `tell_peer(message, target=None, image_paths=[])` — send a one-way heads-up
+  (e.g. "I renamed this field"), optionally with images; no answer expected.
 - `peer_status(target=None)` — check whether the partner is online before relying
   on it.
 - `list_peers()` — show who you can talk to (yourself and the partner).

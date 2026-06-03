@@ -7,6 +7,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
+import { encodeImages } from "./images.js";
+
 async function postJson(url, payload, timeoutMs) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -35,16 +37,23 @@ export async function startAskServer({ name, partnerName, partnerUrl, askTimeout
       description:
         "Ask the partner peer's project an authoritative question and get a direct answer read from its real source. " +
         "Use whenever your work depends on a fact that lives in the OTHER project (a route, JSON field name, type, " +
-        "status code, config key) instead of guessing.",
-      inputSchema: { question: z.string(), target: z.string().optional() },
+        "status code, config key) instead of guessing. Attach screenshots/diagrams via image_paths (local file " +
+        "paths, PNG/JPEG/GIF/WebP) — the peer genuinely sees them.",
+      inputSchema: { question: z.string(), target: z.string().optional(), image_paths: z.array(z.string()).optional() },
     },
-    async ({ question, target }) => {
+    async ({ question, target, image_paths }) => {
       if (target && target !== partnerName) {
         return text(`Error: this peer only knows partner '${partnerName}', not '${target}'.`);
       }
+      let images;
+      try {
+        images = encodeImages(image_paths || []);
+      } catch (e) {
+        return text(`Error: ${e.message}`);
+      }
       let r;
       try {
-        r = await postJson(`${partnerUrl}/ask`, { sender: name, question }, askTimeoutMs);
+        r = await postJson(`${partnerUrl}/ask`, { sender: name, question, images }, askTimeoutMs);
       } catch (e) {
         return text(`Error: could not reach partner '${partnerName}' at ${partnerUrl} (${e.message}). Is its answer daemon running (and the tunnel up)? Try peer_status.`);
       }
@@ -59,15 +68,21 @@ export async function startAskServer({ name, partnerName, partnerUrl, askTimeout
   server.registerTool(
     "tell_peer",
     {
-      description: "Send a one-way note to the partner (fire-and-forget, no answer). Use to inform it of a decision or change.",
-      inputSchema: { message: z.string(), target: z.string().optional() },
+      description: "Send a one-way note to the partner (fire-and-forget, no answer), optionally with images. Use to inform it of a decision or change.",
+      inputSchema: { message: z.string(), target: z.string().optional(), image_paths: z.array(z.string()).optional() },
     },
-    async ({ message, target }) => {
+    async ({ message, target, image_paths }) => {
       if (target && target !== partnerName) {
         return text(`Error: this peer only knows partner '${partnerName}', not '${target}'.`);
       }
+      let images;
       try {
-        const r = await postJson(`${partnerUrl}/tell`, { sender: name, message }, 10_000);
+        images = encodeImages(image_paths || []);
+      } catch (e) {
+        return text(`Error: ${e.message}`);
+      }
+      try {
+        const r = await postJson(`${partnerUrl}/tell`, { sender: name, message, images }, 30_000);
         if (![200, 202].includes(r.status)) return text(`Error delivering note (HTTP ${r.status}): ${r.text.slice(0, 300)}`);
       } catch (e) {
         return text(`Error: could not reach partner '${partnerName}' at ${partnerUrl} (${e.message}).`);
@@ -122,8 +137,13 @@ export async function startAskServer({ name, partnerName, partnerUrl, askTimeout
           const data = await resp.json();
           if (!data.questions || data.questions.length === 0) return text("No pending questions.");
           return text(
-            data.questions.map((q) => `[${q.id}] from "${q.sender}":\n${q.question}`).join("\n\n") +
-              `\n\nAnswer each with answer_incoming(id, answer).`,
+            data.questions
+              .map((q) => {
+                const imgs = q.images && q.images.length ? `\nImages (Read these files to see them): ${q.images.join(", ")}` : "";
+                return `[${q.id}] from "${q.sender}":\n${q.question}${imgs}`;
+              })
+              .join("\n\n") +
+              `\n\nAnswer each with answer_incoming(id, answer). If a question has images, Read them first, then answer.`,
           );
         } catch (e) {
           return text(`Error reaching local relay at ${relayUrl} (${e.message}). Is the relay daemon running?`);

@@ -181,6 +181,19 @@ editable value) and click **Reconnect** in the MCP panel — or re-run
 } } }
 ```
 
+### Sharing images (screenshots / diagrams)
+
+Attach images to a question — **no API key needed**:
+
+```
+ask_peer("does my screen match this endpoint?", image_paths=["C:/Users/you/shot.png"])
+```
+
+The image is sent to the peer and saved on its machine. In **in-chat (`relay`)**
+mode the answering Claude reads it directly (reliable). In headless **`answer`**
+mode the path is handed to `claude` (best-effort — headless image reading is less
+reliable). Supported: PNG, JPEG, GIF, WebP; up to 5 images, 5 MB each.
+
 Drop [peer-snippet.md](peer-snippet.md) into each project's `CLAUDE.md` so its
 Claude reaches for `ask_peer` automatically.
 

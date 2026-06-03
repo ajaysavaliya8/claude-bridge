@@ -53,6 +53,30 @@ test("queues a question, holds /ask, resolves it on /answer", async () => {
   }
 });
 
+test("saves an attached image and surfaces its path in /pending", async () => {
+  const { existsSync } = await import("node:fs");
+  const { server, base } = await start();
+  try {
+    const PNG_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    fetch(`${base}/ask`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sender: "A", question: "see this?", images: [{ name: "s.png", media_type: "image/png", data: PNG_1x1 }] }),
+    }).catch(() => {}); // held open; we don't await it here
+
+    let q;
+    for (let i = 0; i < 100; i++) {
+      const pend = await (await fetch(`${base}/pending`)).json();
+      if (pend.questions.length) { q = pend.questions[0]; break; }
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    assert.equal(q.images.length, 1);
+    assert.ok(existsSync(q.images[0]), "saved image file should exist on disk");
+  } finally {
+    server.close();
+  }
+});
+
 test("rejects /answer for an unknown id", async () => {
   const { server, base } = await start();
   try {

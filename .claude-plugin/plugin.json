@@ -1,9 +1,11 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "claude-bridge",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Two-way Q&A between separate Claude Code sessions: ask_peer the other project and get answers read from its real source. No API key.",
-  "author": { "name": "Ajaykumar Savaliya" },
+  "author": {
+    "name": "Ajaykumar Savaliya"
+  },
   "userConfig": {
     "partner_port": {
       "type": "number",
@@ -37,11 +39,17 @@
     "bridge": {
       "command": "npx",
       "args": [
-        "-y", "github:ajaysavaliya8/claude-bridge", "ask",
-        "--partner-port", "${user_config.partner_port}",
-        "--relay-port", "${user_config.relay_port}",
-        "--name", "${user_config.name}",
-        "--partner-name", "${user_config.partner_name}"
+        "-y",
+        "github:ajaysavaliya8/claude-bridge",
+        "ask",
+        "--partner-port",
+        "${user_config.partner_port}",
+        "--relay-port",
+        "${user_config.relay_port}",
+        "--name",
+        "${user_config.name}",
+        "--partner-name",
+        "${user_config.partner_name}"
       ]
     }
   }
