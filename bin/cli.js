@@ -125,12 +125,15 @@ async function main() {
     const partnerName = args["partner-name"] || env("DEFAULT_TARGET", "partner");
     const askTimeoutMs = (parseInt(env("ASK_TIMEOUT_SECONDS", "300"), 10) + 60) * 1000;
     // Optional: a local relay enables in-chat answering (incoming_questions /
-    // answer_incoming). It's optional, so unset / empty / an unsubstituted plugin
-    // placeholder just disables those tools rather than erroring.
+    // answer_incoming). It's optional, so an invalid / empty / unset / unsubstituted
+    // plugin-placeholder value just disables those tools — it never errors.
     let relayUrl = null;
-    const relayPortArg = args["relay-port"] ?? env("RELAY_PORT");
-    if (relayPortArg !== undefined && relayPortArg !== true && relayPortArg !== "" && !String(relayPortArg).includes("${")) {
-      relayUrl = `http://127.0.0.1:${port(relayPortArg, "--relay-port")}`;
+    const rp = args["relay-port"] ?? env("RELAY_PORT");
+    const rpNum = Number(rp);
+    if (rp !== undefined && rp !== true && rp !== "" && Number.isInteger(rpNum) && rpNum >= 1 && rpNum <= 65535) {
+      relayUrl = `http://127.0.0.1:${rpNum}`;
+    } else if (rp !== undefined && rp !== true && rp !== "" && !String(rp).includes("${")) {
+      console.error(`[claude-bridge] ignoring invalid --relay-port "${rp}" — in-chat answer tools disabled`);
     }
     await startAskServer({ name, partnerName, partnerUrl, askTimeoutMs, relayUrl });
     return;

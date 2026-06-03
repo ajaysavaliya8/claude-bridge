@@ -2,7 +2,7 @@
 // sent over HTTP, and saved to disk on the answering side so its (interactive)
 // Claude can Read them — no API key needed.
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 export const MAX_IMAGE_BYTES = 5_000_000; // 5 MB per image
@@ -55,4 +55,10 @@ export function saveImages(images, dir) {
     }
   });
   return out;
+}
+
+// Delete a saved-image directory once the answer is done (best-effort).
+export function cleanupDir(dir) {
+  if (!dir) return;
+  try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
 }

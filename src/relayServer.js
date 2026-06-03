@@ -3,22 +3,21 @@
 // interactive Claude answers it (via the incoming_questions / answer_incoming MCP
 // tools). That makes the Q&A visible in this peer's own chat. One per peer — run
 // it on both sides for fully two-way in-chat answering. Attached images are saved
-// to disk so the answering Claude can Read them.
+// to disk so the answering Claude can Read them, then cleaned up after answering.
 
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { readBody, send } from "./http.js";
-import { saveImages, MAX_PAYLOAD_BYTES } from "./images.js";
+import { saveImages, cleanupDir, MAX_PAYLOAD_BYTES } from "./images.js";
 
 export function startRelayServer({ port, name, holdSeconds = 1800 }) {
-  // id -> { id, sender, question, imagePaths, ts, res, timer }. `res` is the
-  // asker's held response, completed when /answer arrives (or it times out).
+  // id -> { id, sender, question, imagePaths, imageDir, ts, res, timer }.
   const pending = new Map();
   let seq = 0;
 
-  const server = http.createServer(async (req, res) => {
+  async function handle(req, res) {
     const url = (req.url || "/").split("?")[0];
 
     if (req.method === "GET" && url === "/health") {
@@ -35,13 +34,15 @@ export function startRelayServer({ port, name, holdSeconds = 1800 }) {
       if (!question) return send(res, 400, { answer: "bad request: empty question", is_error: true });
 
       const id = `q${++seq}`;
-      const imagePaths = saveImages(body.images, join(tmpdir(), "claude-bridge", name, id));
+      const imageDir = join(tmpdir(), "claude-bridge", name, id);
+      const imagePaths = saveImages(body.images, imageDir);
       const timer = setTimeout(() => {
         if (pending.delete(id)) {
+          cleanupDir(imagePaths.length ? imageDir : null);
           send(res, 200, { answer: `(no answer from '${name}' within ${holdSeconds}s)`, is_error: true, meta: { id, timed_out: true } });
         }
       }, holdSeconds * 1000);
-      pending.set(id, { id, sender, question, imagePaths, ts: Date.now(), res, timer });
+      pending.set(id, { id, sender, question, imagePaths, imageDir: imagePaths.length ? imageDir : null, ts: Date.now(), res, timer });
       const imgNote = imagePaths.length ? `, ${imagePaths.length} image(s)` : "";
       console.error(`[relay] queued ${id} from '${sender}' (${question.length} chars${imgNote}) — ${pending.size} pending`);
       return; // held open; resolved by /answer or the timer
@@ -76,6 +77,7 @@ export function startRelayServer({ port, name, holdSeconds = 1800 }) {
       if (!entry) return send(res, 404, { ok: false, error: `no pending question with id '${id}' (already answered or expired)` });
       pending.delete(id);
       clearTimeout(entry.timer);
+      cleanupDir(entry.imageDir);
       const answer = String(body.answer || "").trim() || "(empty answer)";
       send(entry.res, 200, { answer, is_error: !!body.is_error, meta: { answered_by: "interactive", id } });
       console.error(`[relay] answered ${id}`);
@@ -83,6 +85,13 @@ export function startRelayServer({ port, name, holdSeconds = 1800 }) {
     }
 
     send(res, 404, { error: "not found" });
+  }
+
+  const server = http.createServer((req, res) => {
+    handle(req, res).catch((e) => {
+      console.error("[relay] handler error:", e?.message || e);
+      if (!res.headersSent) { try { send(res, 500, { error: "internal error", is_error: true }); } catch { /* socket gone */ } }
+    });
   });
 
   server.requestTimeout = 0;   // questions wait for a human; never cut the held /ask
