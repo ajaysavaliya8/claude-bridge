@@ -17,14 +17,14 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { statSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { statSync, mkdirSync, writeFileSync } from "node:fs";
 
 import { AnswerEngine } from "../src/answerEngine.js";
 import { startAnswerServer } from "../src/answerServer.js";
 import { startAskServer } from "../src/askServer.js";
 import { startRelayServer } from "../src/relayServer.js";
 import { runDoctor } from "../src/doctor.js";
-import { VERSION } from "../src/http.js";
+import { VERSION, installShutdown } from "../src/http.js";
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -59,6 +59,19 @@ function port(value, flag) {
   if (!Number.isInteger(n) || n < 1 || n > 65535) die(`${flag} must be a port 1-65535, got "${value}"`);
   return n;
 }
+
+// Validated positive-integer option with a default (a bad value fails loudly
+// instead of silently coercing to NaN→0 and breaking every answer).
+function int(value, flag, dflt, min = 1) {
+  if (value === undefined || value === true || value === "") return dflt;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < min) die(`${flag} must be an integer >= ${min}, got "${value}"`);
+  return n;
+}
+
+// Drop a flag-without-value or an unsubstituted plugin ${placeholder} so it
+// falls through to the env/default instead of becoming a literal value.
+const clean = (v) => (v === true || v === "" || (typeof v === "string" && v.includes("${")) ? undefined : v);
 
 const HELP = `claude-bridge <answer|ask|relay|doctor> [options]    (--version, --help)
 
@@ -103,9 +116,8 @@ async function main() {
   const mode = args._[0];
   if (args.help || args.h || !mode) { console.error(HELP); process.exit(mode ? 0 : 2); }
 
-  const name = args.name || env("PEER_SELF", "peer");
-  let token = args.token || env("BRIDGE_TOKEN") || null;
-  if (token === true || (typeof token === "string" && token.includes("${"))) token = null; // ignore flag-without-value / unsubstituted plugin placeholder
+  const name = clean(args.name) || env("PEER_SELF", "peer");
+  const token = clean(args.token) || env("BRIDGE_TOKEN") || null;
 
   if (mode === "doctor") {
     const cp = args["current-port"] ?? env("CURRENT_PORT");
@@ -128,29 +140,29 @@ async function main() {
 
     const sessionDir = env("BRIDGE_SESSION_DIR", join(homedir(), ".claude-bridge", "sessions"));
     const sessionFile = join(sessionDir, `${name}.session`);
-    if (args["chat-id"] && !existsSync(sessionFile)) {
+    if (typeof args["chat-id"] === "string" && args["chat-id"]) {
       mkdirSync(sessionDir, { recursive: true });
-      writeFileSync(sessionFile, String(args["chat-id"]), "utf8");
+      writeFileSync(sessionFile, args["chat-id"], "utf8"); // explicit --chat-id overrides each run
     }
 
     const engine = new AnswerEngine({
       projectDir: project,
       claudeBin: args["claude-bin"] || env("CLAUDE_BIN", "claude"),
       allowedTools: args["allowed-tools"] || env("ALLOWED_TOOLS", "Read,Grep,Glob"),
-      maxTurns: parseInt(args["max-turns"] || env("MAX_TURNS", "15"), 10),
-      timeoutSec: parseInt(args.timeout || env("CLAUDE_TIMEOUT_SECONDS", "240"), 10),
+      maxTurns: int(args["max-turns"] ?? env("MAX_TURNS"), "--max-turns", 15),
+      timeoutSec: int(args.timeout ?? env("CLAUDE_TIMEOUT_SECONDS"), "--timeout", 240),
       sessionFile,
     });
     const currentPort = port(args["current-port"] ?? env("CURRENT_PORT"), "--current-port");
-    startAnswerServer({ engine, port: currentPort, name, token });
+    installShutdown(startAnswerServer({ engine, port: currentPort, name, token }));
     return;
   }
 
   if (mode === "ask") {
     const host = args["partner-host"] || "127.0.0.1";
     const partnerUrl = `http://${host}:${port(args["partner-port"] ?? env("PARTNER_PORT"), "--partner-port")}`;
-    const partnerName = args["partner-name"] || env("DEFAULT_TARGET", "partner");
-    const askTimeoutMs = (parseInt(env("ASK_TIMEOUT_SECONDS", "300"), 10) + 60) * 1000;
+    const partnerName = clean(args["partner-name"]) || env("DEFAULT_TARGET", "partner");
+    const askTimeoutMs = (int(env("ASK_TIMEOUT_SECONDS"), "ASK_TIMEOUT_SECONDS", 300) + 60) * 1000;
     // Optional: a local relay enables in-chat answering (incoming_questions /
     // answer_incoming). It's optional, so an invalid / empty / unset / unsubstituted
     // plugin-placeholder value just disables those tools — it never errors.
@@ -170,12 +182,12 @@ async function main() {
     // In-chat answering inbox: queues incoming questions for this peer's interactive
     // Claude to pull + answer (via the ask client's --relay-port tools).
     const relayPort = port(args["current-port"] ?? env("CURRENT_PORT"), "--current-port");
-    const holdSeconds = parseInt(args.hold || env("RELAY_HOLD_SECONDS", "1800"), 10);
-    startRelayServer({ port: relayPort, name, holdSeconds, token });
+    const holdSeconds = int(args.hold ?? env("RELAY_HOLD_SECONDS"), "--hold", 1800);
+    installShutdown(startRelayServer({ port: relayPort, name, holdSeconds, token }));
     return;
   }
 
-  die(`unknown mode '${mode}' (expected 'answer', 'ask', or 'relay')`);
+  die(`unknown mode '${mode}' (expected 'answer', 'ask', 'relay', or 'doctor')`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

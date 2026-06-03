@@ -2,6 +2,7 @@
 // (subscription auth; no API key). Bounded subprocess with kill-on-timeout, an
 // is_error guard, and a narrow session self-heal (only a non-zero exit on a
 // RESUMED run clears the accumulating session — a transient blip never wipes it).
+// Supports an AbortSignal so an abandoned answer (asker disconnected) kills claude.
 
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -43,7 +44,7 @@ export class AnswerEngine {
     try { rmSync(this.sessionFile); } catch { /* already gone */ }
   }
 
-  _runClaude(prompt, resume) {
+  _runClaude(prompt, resume, signal) {
     return new Promise((resolve, reject) => {
       const argv = [
         "-p",
@@ -55,14 +56,27 @@ export class AnswerEngine {
       if (resume) argv.push("--resume", resume);
 
       const child = spawn(this.claudeBin, argv, { cwd: this.projectDir });
-      let out = "", err = "", killed = false;
+      let out = "", err = "", killed = false, aborted = false;
+      // B1: a broken pipe (claude exited/closed stdin before we finished writing a
+      // large prompt) emits 'error' on stdin; without this listener Node escalates
+      // it to an uncaughtException and the whole daemon dies. Swallow it — the
+      // 'close' handler reports the real exit code.
+      child.stdin.on("error", () => {});
+
       const timer = setTimeout(() => { killed = true; child.kill("SIGKILL"); }, this.timeoutSec * 1000);
+      const onAbort = () => { aborted = true; killed = true; child.kill("SIGKILL"); };
+      if (signal) {
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      }
+      const cleanup = () => { clearTimeout(timer); if (signal) signal.removeEventListener("abort", onAbort); };
 
       child.stdout.on("data", (d) => { out += d; });
       child.stderr.on("data", (d) => { err += d; });
-      child.on("error", (e) => { clearTimeout(timer); reject(new ClaudeError(`could not spawn claude: ${e.message}`)); });
+      child.on("error", (e) => { cleanup(); reject(new ClaudeError(`could not spawn claude: ${e.message}`)); });
       child.on("close", (code) => {
-        clearTimeout(timer);
+        cleanup();
+        if (aborted) return reject(new ClaudeError("claude run aborted (asker disconnected)"));
         if (killed) return reject(new ClaudeError(`claude timed out after ${this.timeoutSec}s and was killed`));
         if (code !== 0) return reject(new ClaudeExitError(`claude exited ${code}: ${err.slice(0, 2000)}`));
         let data;
@@ -78,7 +92,7 @@ export class AnswerEngine {
     });
   }
 
-  async _sessionTurn(prompt) {
+  async _sessionTurn(prompt, signal) {
     // simple async mutex
     const prev = this._lock;
     let release;
@@ -88,12 +102,12 @@ export class AnswerEngine {
       const resume = this._loadSession();
       let result;
       try {
-        result = await this._runClaude(prompt, resume);
+        result = await this._runClaude(prompt, resume, signal);
       } catch (e) {
         if (!(e instanceof ClaudeExitError) || !resume) throw e;
         console.error("resumed claude run exited non-zero; clearing session, retrying fresh");
         this._clearSession();
-        result = await this._runClaude(prompt, null);
+        result = await this._runClaude(prompt, null, signal);
       }
       if (typeof result.session_id === "string") this._saveSession(result.session_id);
       return result;
@@ -102,13 +116,13 @@ export class AnswerEngine {
     }
   }
 
-  async answer(sender, question, imagePaths = []) {
+  async answer(sender, question, imagePaths = [], { signal } = {}) {
     let prompt = buildQuestionPrompt(sender, question);
     if (imagePaths && imagePaths.length) {
       prompt += `\n\nThe peer attached image file(s) at these local paths — use the Read tool to view them, then factor them into your answer:\n${imagePaths.map((p) => `- ${p}`).join("\n")}`;
     }
     try {
-      const data = await this._sessionTurn(prompt);
+      const data = await this._sessionTurn(prompt, signal);
       return {
         answer: String(data.result || "").trim() || "(empty answer)",
         is_error: false,

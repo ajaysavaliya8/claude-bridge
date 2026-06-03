@@ -68,7 +68,9 @@ export function startRelayServer({ port, name, holdSeconds = 1800, token = null 
       catch { return send(res, 400, { ok: false }); }
       const sender = String(body.sender || "peer") || "peer";
       const message = String(body.message || "").trim();
+      if (!message) return send(res, 400, { ok: false, error: "empty note" });
       if (pending.size >= MAX_PENDING) return send(res, 429, { ok: false, error: "overloaded" });
+      if (countFrom(sender) >= MAX_PER_SENDER) return send(res, 429, { ok: false, error: `too many pending from '${sender}'` });
       const id = `n${++seq}`;
       const imageDir = join(tmpdir(), "claude-bridge", name, id);
       const imagePaths = saveImages(body.images, imageDir);
@@ -86,7 +88,7 @@ export function startRelayServer({ port, name, holdSeconds = 1800, token = null 
 
     if (req.method === "POST" && url === "/answer") {
       let body;
-      try { body = JSON.parse(await readBody(req)); }
+      try { body = JSON.parse(await readBody(req, MAX_PAYLOAD_BYTES)); }
       catch { return send(res, 400, { ok: false, error: "invalid JSON" }); }
       const id = String(body.id || "");
       const entry = pending.get(id);
@@ -113,8 +115,8 @@ export function startRelayServer({ port, name, holdSeconds = 1800, token = null 
       if (!res.headersSent) { try { send(res, 500, { error: "internal error", is_error: true }); } catch { /* socket gone */ } }
     });
   });
-  server.requestTimeout = 0;
-  server.headersTimeout = 0;
+  server.requestTimeout = 0;        // the asker's /ask is intentionally parked (holdSeconds)
+  server.headersTimeout = 30_000;   // but still reap a stalled header phase
   onListenError(server, port);
   server.listen(port, "127.0.0.1", () => {
     console.error(`[claude-bridge ${VERSION}] relay '${name}' on 127.0.0.1:${port}${token ? " (auth on)" : ""} — incoming questions/notes answered in this peer's chat`);

@@ -13,7 +13,7 @@ import { netError } from "./http.js";
 const text = (s) => ({ content: [{ type: "text", text: s }] });
 
 export async function startAskServer({ name, partnerName, partnerUrl, askTimeoutMs, relayUrl, token = null }) {
-  const server = new McpServer({ name: `bridge:${name}`, version: "0.6.0" });
+  const server = new McpServer({ name: `bridge:${name}`, version: "0.7.0" });
   const authHeaders = token ? { authorization: `Bearer ${token}` } : {};
 
   async function post(url, payload, timeoutMs) {
@@ -113,6 +113,8 @@ export async function startAskServer({ name, partnerName, partnerUrl, askTimeout
         let r;
         try { r = await get(`${relayUrl}/pending`, 5000); }
         catch (e) { return text(`Error reaching local relay at ${relayUrl}: ${netError(e)}. Is the relay daemon running?`); }
+        if (r.status === 401) return text(`Error: unauthorized — your token doesn't match the local relay at ${relayUrl}.`);
+        if (r.status !== 200) return text(`Error from local relay at ${relayUrl} (HTTP ${r.status}).`);
         const items = r.json?.questions || [];
         if (!items.length) return text("No pending questions or notes.");
         return text(

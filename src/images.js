@@ -7,7 +7,9 @@ import { basename, join } from "node:path";
 
 export const MAX_IMAGE_BYTES = 5_000_000; // 5 MB per image
 export const MAX_IMAGES = 5;
-export const MAX_PAYLOAD_BYTES = 30_000_000; // HTTP body cap (a few images, base64)
+// Body cap must comfortably fit MAX_IMAGES * MAX_IMAGE_BYTES base64-encoded
+// (~1.37x raw incl. JSON overhead): 5 * 5MB ≈ 25MB raw ≈ 34MB base64.
+export const MAX_PAYLOAD_BYTES = 40_000_000;
 
 const EXT = { "image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp" };
 
@@ -25,7 +27,7 @@ function detectMediaType(buf) {
 export function encodeImages(paths) {
   if (!paths || paths.length === 0) return [];
   if (paths.length > MAX_IMAGES) throw new Error(`too many images (${paths.length}); max is ${MAX_IMAGES}`);
-  return paths.map((p) => {
+  const images = paths.map((p) => {
     let buf;
     try { buf = readFileSync(p); } catch (e) { throw new Error(`cannot read image '${p}': ${e.message}`); }
     if (buf.length > MAX_IMAGE_BYTES) {
@@ -35,19 +37,29 @@ export function encodeImages(paths) {
     if (!media_type) throw new Error(`'${p}' is not a supported image (PNG, JPEG, GIF, or WebP)`);
     return { name: basename(p), media_type, data: buf.toString("base64") };
   });
+  // Aggregate guard: give the asker a clean error instead of the server tearing
+  // down the socket (ECONNRESET) when the combined payload exceeds the body cap.
+  const total = images.reduce((s, i) => s + i.data.length, 0);
+  if (total > MAX_PAYLOAD_BYTES - 200_000) {
+    throw new Error(`images total ~${(total / 1e6).toFixed(1)} MB base64, over the ~${Math.floor(MAX_PAYLOAD_BYTES / 1e6)} MB limit; send fewer/smaller images`);
+  }
+  return images;
 }
 
-// Save received images to `dir` → [absolute paths]. Skips anything malformed.
+// Save received images to `dir` → [absolute paths]. Hardened against untrusted
+// input: non-array → none; caps the count; only creates `dir` if something is
+// actually written (so a malformed batch never leaves an empty dir behind).
 export function saveImages(images, dir) {
-  if (!images || images.length === 0) return [];
-  mkdirSync(dir, { recursive: true });
+  if (!Array.isArray(images) || images.length === 0) return [];
   const out = [];
-  images.forEach((img, i) => {
+  let made = false;
+  images.slice(0, MAX_IMAGES).forEach((img, i) => {
     if (!img || typeof img.data !== "string") return;
     const ext = EXT[img.media_type] || "";
     const safe = String(img.name || `image${i}`).replace(/[^\w.\-]/g, "_");
     const file = join(dir, `${i}_${safe}${safe.toLowerCase().endsWith(ext) ? "" : ext}`);
     try {
+      if (!made) { mkdirSync(dir, { recursive: true }); made = true; }
       writeFileSync(file, Buffer.from(img.data, "base64"));
       out.push(file);
     } catch {

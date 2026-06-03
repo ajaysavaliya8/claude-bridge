@@ -63,7 +63,7 @@ it; restart the session and the tools appear:
 
 ```jsonc
 { "mcpServers": { "bridge": {
-    "command": "npx", "args": ["-y", "github:ajaysavaliya8/claude-bridge#v0.6.0", "ask", "--partner-port", "8082"]
+    "command": "npx", "args": ["-y", "github:ajaysavaliya8/claude-bridge#v0.7.0", "ask", "--partner-port", "8082"]
 } } }
 ```
 
@@ -181,7 +181,7 @@ editable value) and click **Reconnect** in the MCP panel — or re-run
 ```jsonc
 // .mcp.json — edit "8082", save, then hit Reconnect
 { "mcpServers": { "bridge": {
-    "command": "npx", "args": ["-y", "github:ajaysavaliya8/claude-bridge#v0.6.0", "ask", "--partner-port", "8082"]
+    "command": "npx", "args": ["-y", "github:ajaysavaliya8/claude-bridge#v0.7.0", "ask", "--partner-port", "8082"]
 } } }
 ```
 
@@ -233,7 +233,7 @@ files, run shell, or hang the peer. Errors returned to the partner are redacted
 (local stderr/paths stay local). Keep both hosts trusted; never expose ports
 publicly.
 
-> **Pin a version.** `npx -y github:ajaysavaliya8/claude-bridge#v0.6.0` (and the
+> **Pin a version.** `npx -y github:ajaysavaliya8/claude-bridge#v0.7.0` (and the
 > plugin) pin a tag so every spawn runs the same build — an unpinned `…/claude-bridge`
 > can pull a different commit each time.
 

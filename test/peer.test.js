@@ -27,6 +27,7 @@ const mode = process.env.FAKE_MODE;
 process.stdin.resume(); process.stdin.on("data", () => {}); // drain the prompt
 process.stdin.on("end", () => {
   if (mode === "err") { process.stdout.write(JSON.stringify({ is_error: true, subtype: "error_max_turns", result: "x" })); process.exit(0); }
+  if (mode === "badjson") { process.stdout.write("this is not json"); process.exit(0); }
   if (mode === "heal" && resume === "stale") { process.stderr.write("No conversation found"); process.exit(1); }
   const session_id = resume === "stale" ? "stale" : (mode === "heal" ? "fresh" : "s1");
   process.stdout.write(JSON.stringify({ result: "  hi  ", session_id, total_cost_usd: 0.1, num_turns: 2 }));
@@ -86,5 +87,22 @@ test("session self-heals on resumed non-zero exit", async () => {
   const res = await eng.answer("beta", "q");
   assert.equal(res.is_error, false);
   assert.equal(readFileSync(eng.sessionFile, "utf8").trim(), "fresh");
+  delete process.env.FAKE_MODE;
+});
+
+test("answer: unparseable claude output is flagged, not thrown (T6)", async () => {
+  const { path, dir } = fakeClaude();
+  process.env.FAKE_MODE = "badjson";
+  const eng = makeEngine(path, dir);
+  const res = await eng.answer("beta", "q");
+  assert.equal(res.is_error, true);
+  delete process.env.FAKE_MODE;
+});
+
+test("note() folds a note in without throwing (T6)", async () => {
+  const { path, dir } = fakeClaude();
+  process.env.FAKE_MODE = "ok";
+  const eng = makeEngine(path, dir);
+  await eng.note("beta", "fyi: renamed a field"); // resolves cleanly
   delete process.env.FAKE_MODE;
 });

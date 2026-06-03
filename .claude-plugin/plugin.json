@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "claude-bridge",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Two-way Q&A between separate Claude Code sessions: ask_peer the other project and get answers read from its real source. No API key.",
   "author": {
     "name": "Ajaykumar Savaliya"
@@ -46,7 +46,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "github:ajaysavaliya8/claude-bridge#v0.6.0",
+        "github:ajaysavaliya8/claude-bridge#v0.7.0",
         "ask",
         "--partner-port",
         "${user_config.partner_port}",

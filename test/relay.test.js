@@ -125,12 +125,68 @@ test("rejects /answer for an unknown id", async () => {
   }
 });
 
-test("health reports relay mode", async () => {
+test("health reports relay mode + version", async () => {
   const { server, base } = await start();
   try {
     const h = await (await fetch(`${base}/health`)).json();
     assert.equal(h.status, "ok");
     assert.equal(h.mode, "relay");
+    assert.equal(h.answer, true);
+    assert.ok(h.version);
+  } finally {
+    server.close();
+  }
+});
+
+const post = (base, path, body) =>
+  fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+const pendCount = async (base) => (await (await fetch(`${base}/pending`)).json()).questions.length;
+async function until(fn, ms = 2000) { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await new Promise((r) => setTimeout(r, 10)); } return false; }
+
+test("hold expiry returns a timed_out error and clears the question (T3)", async () => {
+  const { startRelayServer } = await import("../src/relayServer.js");
+  const server = startRelayServer({ port: 0, name: "B", holdSeconds: 0.05 });
+  if (!server.listening) await new Promise((r) => server.once("listening", r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const got = await (await post(base, "/ask", { sender: "A", question: "q" })).json();
+    assert.equal(got.is_error, true);
+    assert.equal(got.meta.timed_out, true);
+    assert.equal(await pendCount(base), 0);
+  } finally {
+    server.close();
+  }
+});
+
+test("asker disconnect drops the pending question (T2)", async () => {
+  const { server, base } = await start(); // holdSeconds 10
+  try {
+    const ctrl = new AbortController();
+    fetch(`${base}/ask`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sender: "A", question: "q" }), signal: ctrl.signal }).catch(() => {});
+    assert.ok(await until(async () => (await pendCount(base)) === 1), "question should queue");
+    ctrl.abort();
+    assert.ok(await until(async () => (await pendCount(base)) === 0), "question should be dropped on disconnect");
+  } finally {
+    server.close();
+  }
+});
+
+test("enforces the per-sender cap with 429 (T5)", async () => {
+  const { server, base } = await start(); // holdSeconds 10 — requests stay held
+  try {
+    for (let i = 0; i < 20; i++) post(base, "/ask", { sender: "A", question: `q${i}` }).catch(() => {}); // MAX_PER_SENDER
+    assert.ok(await until(async () => (await pendCount(base)) >= 20), "20 should queue");
+    const over = await post(base, "/ask", { sender: "A", question: "too-many" });
+    assert.equal(over.status, 429);
+  } finally {
+    server.close();
+  }
+});
+
+test("/tell rejects an empty note (R6)", async () => {
+  const { server, base } = await start();
+  try {
+    assert.equal((await post(base, "/tell", { sender: "A", message: "   " })).status, 400);
   } finally {
     server.close();
   }

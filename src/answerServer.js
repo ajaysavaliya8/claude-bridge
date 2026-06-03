@@ -1,6 +1,7 @@
 // ANSWER side: a small HTTP daemon the partner posts questions to. It runs the
-// claude answering engine read-only in the project (headless). Attached images are
-// saved to disk and their paths handed to claude (best-effort), then cleaned up.
+// claude answering engine read-only in the project (headless). If the asker
+// disconnects, the in-flight claude run is aborted (frees the serialized engine
+// slot + stops wasting compute). Attached images are saved then cleaned up.
 
 import http from "node:http";
 import { tmpdir } from "node:os";
@@ -31,10 +32,14 @@ export function startAnswerServer({ engine, port, name, token = null }) {
       if (url === "/ask") {
         const question = String(body.question || "").trim();
         if (!question) { cleanupDir(imagePaths.length ? imageDir : null); return send(res, 400, { answer: "bad request: empty question", is_error: true }); }
+        // Abort the claude run if the asker gives up mid-answer.
+        const ac = new AbortController();
+        res.on("close", () => { if (!res.writableEnded) ac.abort(); });
         console.error(`answering question from '${sender}' (${question.length} chars${imagePaths.length ? `, ${imagePaths.length} image(s)` : ""})`);
         try {
-          const result = await engine.answer(sender, question, imagePaths);
-          return send(res, 200, result);
+          const result = await engine.answer(sender, question, imagePaths, { signal: ac.signal });
+          if (!res.writableEnded && !res.destroyed) return send(res, 200, result);
+          return; // asker already gone — nothing to deliver
         } finally {
           cleanupDir(imagePaths.length ? imageDir : null);
         }
@@ -56,8 +61,10 @@ export function startAnswerServer({ engine, port, name, token = null }) {
       if (!res.headersSent) { try { send(res, 500, { error: "internal error", is_error: true }); } catch { /* socket gone */ } }
     });
   });
-  server.requestTimeout = 0;
-  server.headersTimeout = 0;
+  // Request receipt is fast; the long part is the response (claude). Keep a
+  // generous-but-finite request timeout (above the per-answer cap) + reap stalled headers.
+  server.requestTimeout = (engine.timeoutSec + 60) * 1000;
+  server.headersTimeout = 30_000;
   onListenError(server, port);
   server.listen(port, "127.0.0.1", () => {
     console.error(`[claude-bridge ${VERSION}] answer daemon '${name}' on 127.0.0.1:${port}${token ? " (auth on)" : ""} (project: ${engine.projectDir})`);
