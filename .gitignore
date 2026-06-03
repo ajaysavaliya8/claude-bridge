@@ -1,43 +1,17 @@
-# Secrets / local config — NEVER commit these
+# Dependencies
+node_modules/
+
+# Secrets / local config — never commit
 .env
 .env.*
-!.env.example
+.mcp.json
 
-# Claude Code / local agent tooling (kept out of the repo)
+# Claude Code / local agent tooling
 .claude/
 CLAUDE.md
 CLAUDE.local.md
-.mcp.json
 
-# Attachment blob store (bytes live on disk; never commit them)
-attachments/*
-!attachments/.gitkeep
-
-# Per-peer headless session cache
-.sessions/
-
-# SQLite database + WAL sidecars
-*.db
-*.db-wal
-*.db-shm
-
-# Python
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-*.egg-info/
-build/
-dist/
-.venv/
-.venv_clean/
-venv/
-.tox/
-.coverage
-htmlcov/
-
-# Editors / OS
+# Editors / OS / logs
 .vscode/
 .idea/
 *.swp
