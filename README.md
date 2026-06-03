@@ -63,7 +63,7 @@ it; restart the session and the tools appear:
 
 ```jsonc
 { "mcpServers": { "bridge": {
-    "command": "npx", "args": ["-y", "github:ajaysavaliya8/claude-bridge", "ask", "--partner-port", "8082"]
+    "command": "npx", "args": ["-y", "github:ajaysavaliya8/claude-bridge#v0.6.0", "ask", "--partner-port", "8082"]
 } } }
 ```
 
@@ -110,14 +110,18 @@ ssh -N -L 8082:127.0.0.1:8082 -R 8081:127.0.0.1:8081 <vps-user>@<vps-host>
 
 ## Answering modes — headless vs. in-chat
 
-Each peer chooses how it answers the *other* peer's questions:
+Each peer chooses how it answers the *other* peer's questions. **This is a real
+trade-off — you can have *autonomous* or *in your chat*, not both:**
 
-- **`answer` (headless, instant):** runs `claude` automatically; the asker gets a
-  reply in seconds, no human involved. The exchange shows only in the daemon log.
-- **`relay` (in-chat, visible):** queues each incoming question so **this peer's
-  interactive Claude** answers it *in its own chat* — it calls `incoming_questions`,
-  then `answer_incoming(id, answer)`, and the reply flows back to the asker.
-  Visible/auditable on the answering side; the asker waits until you answer.
+- **`answer` (headless, autonomous):** auto-detects each incoming question and
+  answers it instantly with no human — this is the "messages should just be picked
+  up automatically" mode. The exchange shows in the daemon log, not your chat.
+- **`relay` (in-chat, visible):** the question surfaces in **this peer's own
+  interactive chat**; you trigger answering by saying *"check peer questions"*
+  (Claude calls `incoming_questions` → `answer_incoming`). **It can't auto-answer**
+  because nothing can wake a live Claude Code session from outside — that's a
+  Claude Code constraint, not a claude-bridge one. So: pick `answer` if you want
+  hands-off; pick `relay` if you want every exchange visible/auditable in the chat.
 
 ### Two-way in-chat (A ⇆ B)
 Run the **same combo** on both peers — a relay (your inbox) plus an ask client
@@ -177,7 +181,7 @@ editable value) and click **Reconnect** in the MCP panel — or re-run
 ```jsonc
 // .mcp.json — edit "8082", save, then hit Reconnect
 { "mcpServers": { "bridge": {
-    "command": "npx", "args": ["-y", "github:ajaysavaliya8/claude-bridge", "ask", "--partner-port", "8082"]
+    "command": "npx", "args": ["-y", "github:ajaysavaliya8/claude-bridge#v0.6.0", "ask", "--partner-port", "8082"]
 } } }
 ```
 
@@ -199,13 +203,39 @@ Claude reaches for `ask_peer` automatically.
 
 ---
 
+## Health check & version
+
+```bash
+claude-bridge doctor --current-port 8082 --partner-port 8091   # one-shot topology/health
+claude-bridge --version
+```
+`doctor` reports whether your daemon is up, whether the partner is reachable, the
+versions, and reminds you that **after `claude mcp add` you must reload the Claude
+Code host** (VS Code: "Developer: Reload Window") to load the tools — reopening
+the chat panel is **not** enough.
+
 ## Security model
 
-No application-level auth by design: each peer binds to `127.0.0.1`, and
+By default there's no app-level auth: each peer binds to `127.0.0.1` and
 cross-machine traffic goes through an SSH tunnel — that's the trust boundary.
-Answering is **read-only** (`Read,Grep,Glob`) and each `claude` run is killed
-after `--timeout` seconds, so a question can't edit files, run shell, or hang the
-peer. Keep both hosts trusted; never expose the ports publicly.
+For shared/multi-user hosts, set a **shared secret** so a random local process
+can't query your daemon or trigger paid `claude` runs:
+
+```bash
+# same value on both peers (flag or BRIDGE_TOKEN env); the plugin has a "token" field
+claude-bridge relay  --current-port 8082 --name backend --token "$BRIDGE_TOKEN"
+claude-bridge answer --current-port 8082 --name backend --token "$BRIDGE_TOKEN"
+```
+Requests then need `Authorization: Bearer <token>` (the ask client sends it
+automatically); `/health` stays open. Answering is **read-only** (`Read,Grep,Glob`)
+and each `claude` run is killed after `--timeout`s, so a question can't edit
+files, run shell, or hang the peer. Errors returned to the partner are redacted
+(local stderr/paths stay local). Keep both hosts trusted; never expose ports
+publicly.
+
+> **Pin a version.** `npx -y github:ajaysavaliya8/claude-bridge#v0.6.0` (and the
+> plugin) pin a tag so every spawn runs the same build — an unpinned `…/claude-bridge`
+> can pull a different commit each time.
 
 ---
 

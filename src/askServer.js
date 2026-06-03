@@ -8,28 +8,30 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 import { encodeImages } from "./images.js";
-
-async function postJson(url, payload, timeoutMs) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: ctrl.signal,
-    });
-    const text = await resp.text();
-    return { status: resp.status, text };
-  } finally {
-    clearTimeout(t);
-  }
-}
+import { netError } from "./http.js";
 
 const text = (s) => ({ content: [{ type: "text", text: s }] });
 
-export async function startAskServer({ name, partnerName, partnerUrl, askTimeoutMs, relayUrl }) {
-  const server = new McpServer({ name: `bridge:${name}`, version: "0.1.0" });
+export async function startAskServer({ name, partnerName, partnerUrl, askTimeoutMs, relayUrl, token = null }) {
+  const server = new McpServer({ name: `bridge:${name}`, version: "0.6.0" });
+  const authHeaders = token ? { authorization: `Bearer ${token}` } : {};
+
+  async function post(url, payload, timeoutMs) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const resp = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...authHeaders }, body: JSON.stringify(payload), signal: ctrl.signal });
+      return { status: resp.status, text: await resp.text() };
+    } finally { clearTimeout(t); }
+  }
+  async function get(url, timeoutMs) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const resp = await fetch(url, { headers: authHeaders, signal: ctrl.signal });
+      return { status: resp.status, json: await resp.json().catch(() => null) };
+    } finally { clearTimeout(t); }
+  }
 
   server.registerTool(
     "ask_peer",
@@ -42,21 +44,13 @@ export async function startAskServer({ name, partnerName, partnerUrl, askTimeout
       inputSchema: { question: z.string(), target: z.string().optional(), image_paths: z.array(z.string()).optional() },
     },
     async ({ question, target, image_paths }) => {
-      if (target && target !== partnerName) {
-        return text(`Error: this peer only knows partner '${partnerName}', not '${target}'.`);
-      }
+      if (target && target !== partnerName) return text(`Error: this peer only knows partner '${partnerName}', not '${target}'.`);
       let images;
-      try {
-        images = encodeImages(image_paths || []);
-      } catch (e) {
-        return text(`Error: ${e.message}`);
-      }
+      try { images = encodeImages(image_paths || []); } catch (e) { return text(`Error: ${e.message}`); }
       let r;
-      try {
-        r = await postJson(`${partnerUrl}/ask`, { sender: name, question, images }, askTimeoutMs);
-      } catch (e) {
-        return text(`Error: could not reach partner '${partnerName}' at ${partnerUrl} (${e.message}). Is its answer daemon running (and the tunnel up)? Try peer_status.`);
-      }
+      try { r = await post(`${partnerUrl}/ask`, { sender: name, question, images }, askTimeoutMs); }
+      catch (e) { return text(`Error reaching partner '${partnerName}' at ${partnerUrl}: ${netError(e)}. Try peer_status.`); }
+      if (r.status === 401) return text(`Error: unauthorized — your token doesn't match partner '${partnerName}'.`);
       if (r.status !== 200) return text(`Error from partner '${partnerName}' (HTTP ${r.status}): ${r.text.slice(0, 500)}`);
       let data;
       try { data = JSON.parse(r.text); } catch { return text(`Error: partner returned non-JSON: ${r.text.slice(0, 300)}`); }
@@ -72,42 +66,30 @@ export async function startAskServer({ name, partnerName, partnerUrl, askTimeout
       inputSchema: { message: z.string(), target: z.string().optional(), image_paths: z.array(z.string()).optional() },
     },
     async ({ message, target, image_paths }) => {
-      if (target && target !== partnerName) {
-        return text(`Error: this peer only knows partner '${partnerName}', not '${target}'.`);
-      }
+      if (target && target !== partnerName) return text(`Error: this peer only knows partner '${partnerName}', not '${target}'.`);
       let images;
-      try {
-        images = encodeImages(image_paths || []);
-      } catch (e) {
-        return text(`Error: ${e.message}`);
-      }
-      try {
-        const r = await postJson(`${partnerUrl}/tell`, { sender: name, message, images }, 30_000);
-        if (![200, 202].includes(r.status)) return text(`Error delivering note (HTTP ${r.status}): ${r.text.slice(0, 300)}`);
-      } catch (e) {
-        return text(`Error: could not reach partner '${partnerName}' at ${partnerUrl} (${e.message}).`);
-      }
-      return text(`Note delivered to '${partnerName}'.`);
+      try { images = encodeImages(image_paths || []); } catch (e) { return text(`Error: ${e.message}`); }
+      let r;
+      try { r = await post(`${partnerUrl}/tell`, { sender: name, message, images }, 30_000); }
+      catch (e) { return text(`Error reaching partner '${partnerName}' at ${partnerUrl}: ${netError(e)}.`); }
+      if (r.status === 401) return text(`Error: unauthorized — token mismatch with '${partnerName}'.`);
+      if (![200, 202].includes(r.status)) return text(`Error delivering note (HTTP ${r.status}): ${r.text.slice(0, 300)}`);
+      // Honest semantics: it's queued/accepted on the peer's side, not "read".
+      return text(`Note queued for '${partnerName}' — fire-and-forget (it surfaces in the peer's session; there's no read receipt).`);
     },
   );
 
   server.registerTool(
     "peer_status",
-    { description: "Report whether the partner peer is reachable and answering.", inputSchema: { target: z.string().optional() } },
+    { description: "Report whether the partner peer is reachable, and how it answers.", inputSchema: { target: z.string().optional() } },
     async () => {
-      try {
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 5000);
-        const resp = await fetch(`${partnerUrl}/health`, { signal: ctrl.signal });
-        clearTimeout(t);
-        if (resp.status === 200) {
-          const h = await resp.json();
-          return text(`Partner '${h.name || partnerName}' is ONLINE at ${partnerUrl} (answering=${h.answer}).`);
-        }
-        return text(`Partner '${partnerName}' replied HTTP ${resp.status} at ${partnerUrl}.`);
-      } catch (e) {
-        return text(`Partner '${partnerName}' is OFFLINE/unreachable at ${partnerUrl} (${e.message}).`);
-      }
+      let r;
+      try { r = await get(`${partnerUrl}/health`, 5000); }
+      catch (e) { return text(`Partner '${partnerName}' is OFFLINE/unreachable at ${partnerUrl}: ${netError(e)}.`); }
+      if (r.status !== 200 || !r.json) return text(`Partner '${partnerName}' replied HTTP ${r.status} at ${partnerUrl}.`);
+      const h = r.json;
+      const extra = h.mode === "relay" ? `, ${h.pending ?? 0} pending` : "";
+      return text(`Partner '${h.name || partnerName}' is ONLINE at ${partnerUrl} — mode=${h.mode || "?"}, answering=${h.answer === true}, version=${h.version || "?"}${extra}.`);
     },
   );
 
@@ -117,56 +99,52 @@ export async function startAskServer({ name, partnerName, partnerUrl, askTimeout
     async () => text(`You are '${name}'. Partner '${partnerName}' at ${partnerUrl} (use peer_status for liveness).`),
   );
 
-  // In-chat answering: when a local relay is configured, expose tools so THIS
-  // session can pull questions other peers asked it and answer them in-chat.
+  // In-chat answering: only when a local relay is configured.
   if (relayUrl) {
     server.registerTool(
       "incoming_questions",
       {
         description:
-          "List questions other peers have asked YOU that are waiting for an answer. Call this (e.g. when the user " +
-          "says to check peer questions), then answer each one accurately from THIS project's real code via answer_incoming.",
+          "List questions/notes other peers have sent YOU that are waiting. Call this (e.g. when the user says to " +
+          "check peer questions), then answer each question from THIS project's real code via answer_incoming.",
         inputSchema: {},
       },
       async () => {
-        try {
-          const ctrl = new AbortController();
-          const t = setTimeout(() => ctrl.abort(), 5000);
-          const resp = await fetch(`${relayUrl}/pending`, { signal: ctrl.signal });
-          clearTimeout(t);
-          const data = await resp.json();
-          if (!data.questions || data.questions.length === 0) return text("No pending questions.");
-          return text(
-            data.questions
-              .map((q) => {
-                const imgs = q.images && q.images.length ? `\nImages (Read these files to see them): ${q.images.join(", ")}` : "";
-                return `[${q.id}] from "${q.sender}":\n${q.question}${imgs}`;
-              })
-              .join("\n\n") +
-              `\n\nAnswer each with answer_incoming(id, answer). If a question has images, Read them first, then answer.`,
-          );
-        } catch (e) {
-          return text(`Error reaching local relay at ${relayUrl} (${e.message}). Is the relay daemon running?`);
-        }
+        let r;
+        try { r = await get(`${relayUrl}/pending`, 5000); }
+        catch (e) { return text(`Error reaching local relay at ${relayUrl}: ${netError(e)}. Is the relay daemon running?`); }
+        const items = r.json?.questions || [];
+        if (!items.length) return text("No pending questions or notes.");
+        return text(
+          items
+            .map((q) => {
+              const tag = q.kind === "note" ? `📝 note [${q.id}]` : `[${q.id}]`;
+              const imgs = q.images && q.images.length ? `\nImages (Read these files to see them): ${q.images.join(", ")}` : "";
+              return `${tag} from "${q.sender}":\n${q.question}${imgs}`;
+            })
+            .join("\n\n") +
+            `\n\nAnswer each QUESTION with answer_incoming(id, answer) (Read any images first). Notes (📝) are FYI — no reply needed.`,
+        );
       },
     );
 
     server.registerTool(
       "answer_incoming",
       {
-        description:
-          "Send your answer to a pending incoming question (get its id from incoming_questions). The answer is " +
-          "returned to the peer that asked. Answer accurately and authoritatively from THIS project's real code.",
+        description: "Send your answer to a pending incoming question (id from incoming_questions). Answer accurately from THIS project's real code.",
         inputSchema: { id: z.string(), answer: z.string() },
       },
       async ({ id, answer }) => {
-        try {
-          const r = await postJson(`${relayUrl}/answer`, { id, answer }, 10_000);
-          if (r.status !== 200) return text(`Error sending answer (HTTP ${r.status}): ${r.text.slice(0, 300)}`);
-          return text(`Answer for ${id} delivered to the asker.`);
-        } catch (e) {
-          return text(`Error reaching local relay at ${relayUrl} (${e.message}).`);
-        }
+        let r;
+        try { r = await post(`${relayUrl}/answer`, { id, answer }, 10_000); }
+        catch (e) { return text(`Error reaching local relay at ${relayUrl}: ${netError(e)}.`); }
+        if (r.status === 404) return text(`No pending item '${id}' — it was already handled, expired, or the asker gave up.`);
+        if (r.status !== 200) return text(`Error sending answer (HTTP ${r.status}): ${r.text.slice(0, 300)}`);
+        let data;
+        try { data = JSON.parse(r.text); } catch { data = {}; }
+        if (data.kind === "note") return text(`Noted (${id}) — notes don't get a reply.`);
+        if (data.delivered === false) return text(`⚠️ Sent ${id}, but the asker had already given up — answer not delivered.`);
+        return text(`Answer for ${id} delivered to the asker.`);
       },
     );
   }
@@ -174,6 +152,6 @@ export async function startAskServer({ name, partnerName, partnerUrl, askTimeout
   await server.connect(new StdioServerTransport());
   console.error(
     `[claude-bridge] ask MCP (stdio) for '${name}' -> partner '${partnerName}' at ${partnerUrl}` +
-      (relayUrl ? ` | answering incoming via relay ${relayUrl}` : ""),
+      (relayUrl ? ` | answering incoming via relay ${relayUrl}` : "") + (token ? " | auth on" : ""),
   );
 }

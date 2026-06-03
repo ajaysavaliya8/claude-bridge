@@ -116,8 +116,8 @@ export class AnswerEngine {
         meta: { session_id: data.session_id, num_turns: data.num_turns, duration_ms: data.duration_ms },
       };
     } catch (e) {
-      console.error("answer failed:", e.message);
-      return { answer: `(could not answer: ${e.message})`, is_error: true, cost_usd: null, meta: {} };
+      console.error("answer failed:", e.message); // full detail (incl. stderr) stays LOCAL
+      return { answer: "(the peer could not answer — its claude run failed; check that peer's own logs)", is_error: true, cost_usd: null, meta: {} };
     }
   }
 

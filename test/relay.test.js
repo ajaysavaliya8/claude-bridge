@@ -77,6 +77,40 @@ test("saves an attached image and surfaces its path in /pending", async () => {
   }
 });
 
+test("/tell queues a note, flagged kind:note in /pending, with an honest ack", async () => {
+  const { server, base } = await start();
+  try {
+    const ack = await (await fetch(`${base}/tell`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sender: "A", message: "fyi: renamed a field" }),
+    })).json();
+    assert.equal(ack.ok, true);
+    assert.equal(ack.queued, true);
+    const pend = await (await fetch(`${base}/pending`)).json();
+    assert.equal(pend.questions.length, 1);
+    assert.equal(pend.questions[0].kind, "note");
+    assert.equal(pend.questions[0].question, "fyi: renamed a field");
+  } finally {
+    server.close();
+  }
+});
+
+test("enforces the shared-secret token when one is set (health stays open)", async () => {
+  const { startRelayServer } = await import("../src/relayServer.js");
+  const server = startRelayServer({ port: 0, name: "B", holdSeconds: 5, token: "s3cret" });
+  if (!server.listening) await new Promise((r) => server.once("listening", r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const noTok = await fetch(`${base}/tell`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sender: "A", message: "x" }) });
+    assert.equal(noTok.status, 401);
+    const withTok = await fetch(`${base}/tell`, { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer s3cret" }, body: JSON.stringify({ sender: "A", message: "x" }) });
+    assert.equal(withTok.status, 202);
+    assert.equal((await fetch(`${base}/health`)).status, 200); // health is unauthenticated
+  } finally {
+    server.close();
+  }
+});
+
 test("rejects /answer for an unknown id", async () => {
   const { server, base } = await start();
   try {

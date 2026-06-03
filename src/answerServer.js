@@ -1,24 +1,24 @@
 // ANSWER side: a small HTTP daemon the partner posts questions to. It runs the
 // claude answering engine read-only in the project (headless). Attached images are
-// saved to disk and their paths handed to claude (best-effort — headless image
-// reading is less reliable than the interactive 'relay' mode), then cleaned up.
+// saved to disk and their paths handed to claude (best-effort), then cleaned up.
 
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { readBody, send } from "./http.js";
+import { readBody, send, tokenOk, onListenError, VERSION } from "./http.js";
 import { saveImages, cleanupDir, MAX_PAYLOAD_BYTES } from "./images.js";
 
-export function startAnswerServer({ engine, port, name }) {
+export function startAnswerServer({ engine, port, name, token = null }) {
   let seq = 0;
 
   async function handle(req, res) {
     const url = (req.url || "/").split("?")[0];
 
     if (req.method === "GET" && url === "/health") {
-      return send(res, 200, { status: "ok", name, answer: true });
+      return send(res, 200, { status: "ok", name, mode: "answer", answer: true, version: VERSION });
     }
+    if (!tokenOk(req, token)) return send(res, 401, { answer: "unauthorized (bad or missing token)", is_error: true });
 
     if (req.method === "POST" && (url === "/ask" || url === "/tell")) {
       let body;
@@ -31,8 +31,7 @@ export function startAnswerServer({ engine, port, name }) {
       if (url === "/ask") {
         const question = String(body.question || "").trim();
         if (!question) { cleanupDir(imagePaths.length ? imageDir : null); return send(res, 400, { answer: "bad request: empty question", is_error: true }); }
-        const imgNote = imagePaths.length ? `, ${imagePaths.length} image(s)` : "";
-        console.error(`answering question from '${sender}' (${question.length} chars${imgNote})`);
+        console.error(`answering question from '${sender}' (${question.length} chars${imagePaths.length ? `, ${imagePaths.length} image(s)` : ""})`);
         try {
           const result = await engine.answer(sender, question, imagePaths);
           return send(res, 200, result);
@@ -40,12 +39,12 @@ export function startAnswerServer({ engine, port, name }) {
           cleanupDir(imagePaths.length ? imageDir : null);
         }
       }
-      // /tell — fire-and-forget note
+      // /tell — fire-and-forget note (injected into this peer's accumulating session)
       let message = String(body.message || "").trim();
       if (imagePaths.length) message += `\n(attached image file(s): ${imagePaths.join(", ")})`;
       if (message) engine.note(sender, message).finally(() => cleanupDir(imagePaths.length ? imageDir : null));
       else cleanupDir(imagePaths.length ? imageDir : null);
-      return send(res, 202, { ok: true });
+      return send(res, 202, { ok: true, queued: true, note: "injected into the peer's session; fire-and-forget" });
     }
 
     send(res, 404, { error: "not found" });
@@ -57,19 +56,11 @@ export function startAnswerServer({ engine, port, name }) {
       if (!res.headersSent) { try { send(res, 500, { error: "internal error", is_error: true }); } catch { /* socket gone */ } }
     });
   });
-
-  // Answers can legitimately take minutes (claude reading a big project); don't let
-  // Node's default request timeout (5 min) cut a long answer short.
   server.requestTimeout = 0;
   server.headersTimeout = 0;
-  server.on("error", (e) => {
-    if (e.code === "EADDRINUSE") console.error(`[claude-bridge] port ${port} is already in use — stop what's using it, or pick another --current-port.`);
-    else console.error(`[claude-bridge] server error: ${e.message}`);
-    process.exit(1);
-  });
-
+  onListenError(server, port);
   server.listen(port, "127.0.0.1", () => {
-    console.error(`[claude-bridge] answer daemon '${name}' on 127.0.0.1:${port} (project: ${engine.projectDir})`);
+    console.error(`[claude-bridge ${VERSION}] answer daemon '${name}' on 127.0.0.1:${port}${token ? " (auth on)" : ""} (project: ${engine.projectDir})`);
   });
   return server;
 }

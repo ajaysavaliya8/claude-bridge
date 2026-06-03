@@ -1,6 +1,6 @@
 {
   "name": "claude-bridge-peer",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Let two Claude Code sessions talk: ask_peer over MCP, answers read from the partner project's real source via the local claude CLI. No API key.",
   "type": "module",
   "bin": {
