@@ -1,0 +1,13 @@
+# Normalize line endings so shell scripts stay LF (and run on Linux) while
+# Windows-only PowerShell scripts keep CRLF.
+* text=auto eol=lf
+
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary-ish assets git should not touch
+*.png binary
+*.jpg binary
+*.gif binary
+*.webp binary

@@ -1,0 +1,1 @@
+# Keeps the attachments blob dir in git. Actual attachment bytes are gitignored.
