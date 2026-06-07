@@ -9,6 +9,7 @@ import { join } from "node:path";
 
 import { readBody, send, tokenOk, onListenError, VERSION } from "./http.js";
 import { saveImages, cleanupDir, MAX_PAYLOAD_BYTES } from "./images.js";
+import { searchTranscripts, readSession } from "./transcripts.js";
 
 export function startAnswerServer({ engine, port, name, token = null }) {
   let seq = 0;
@@ -20,6 +21,13 @@ export function startAnswerServer({ engine, port, name, token = null }) {
       return send(res, 200, { status: "ok", name, mode: "answer", answer: true, version: VERSION });
     }
     if (!tokenOk(req, token)) return send(res, 401, { answer: "unauthorized (bad or missing token)", is_error: true });
+
+    if (req.method === "POST" && (url === "/search" || url === "/read")) {
+      let body;
+      try { body = JSON.parse(await readBody(req)); }
+      catch { return send(res, 400, { error: "invalid JSON" }); }
+      return send(res, 200, url === "/search" ? searchTranscripts(body) : readSession(body));
+    }
 
     if (req.method === "POST" && (url === "/ask" || url === "/tell")) {
       let body;

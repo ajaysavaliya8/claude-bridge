@@ -25,6 +25,10 @@ authoritative and make your code match it.
 - `peer_status(target=None)` — check whether the partner is online before relying
   on it.
 - `list_peers()` — show who you can talk to (yourself and the partner).
+- `search_peer(query)` — search the partner's Claude chat transcripts (what its
+  sessions discussed/decided), substring or `/regex/`.
+- `read_peer_chat(...)` — read the partner's recent chat (latest or a given
+  session; last N or sinceLastUserPrompt).
 
 If in-chat answering is enabled (the `incoming_questions` / `answer_incoming` tools
 are present), you are also the one who answers the partner's questions:

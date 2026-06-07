@@ -13,7 +13,7 @@ import { netError } from "./http.js";
 const text = (s) => ({ content: [{ type: "text", text: s }] });
 
 export async function startAskServer({ name, partnerName, partnerUrl, askTimeoutMs, relayUrl, token = null }) {
-  const server = new McpServer({ name: `bridge:${name}`, version: "0.7.0" });
+  const server = new McpServer({ name: `bridge:${name}`, version: "0.8.0" });
   const authHeaders = token ? { authorization: `Bearer ${token}` } : {};
 
   async function post(url, payload, timeoutMs) {
@@ -31,6 +31,18 @@ export async function startAskServer({ name, partnerName, partnerUrl, askTimeout
       const resp = await fetch(url, { headers: authHeaders, signal: ctrl.signal });
       return { status: resp.status, json: await resp.json().catch(() => null) };
     } finally { clearTimeout(t); }
+  }
+
+  // Piggyback nudge: if THIS peer also runs a relay (it answers too), surface a
+  // pending count on other tool results so questions get noticed without a manual
+  // "check peer questions" — best-effort, never blocks the real result.
+  async function pendingNudge() {
+    if (!relayUrl) return "";
+    try {
+      const r = await get(`${relayUrl}/pending`, 2000);
+      const n = (r.json?.questions || []).length;
+      return n ? `\n\n📥 You also have ${n} pending peer item(s) — call incoming_questions to handle them.` : "";
+    } catch { return ""; }
   }
 
   server.registerTool(
@@ -55,7 +67,8 @@ export async function startAskServer({ name, partnerName, partnerUrl, askTimeout
       let data;
       try { data = JSON.parse(r.text); } catch { return text(`Error: partner returned non-JSON: ${r.text.slice(0, 300)}`); }
       const answer = String(data.answer || "").trim() || "(empty answer)";
-      return text(data.is_error ? `⚠️ Partner '${partnerName}' could not answer:\n${answer}` : answer);
+      const body = data.is_error ? `⚠️ Partner '${partnerName}' could not answer:\n${answer}` : answer;
+      return text(body + (await pendingNudge()));
     },
   );
 
@@ -75,7 +88,7 @@ export async function startAskServer({ name, partnerName, partnerUrl, askTimeout
       if (r.status === 401) return text(`Error: unauthorized — token mismatch with '${partnerName}'.`);
       if (![200, 202].includes(r.status)) return text(`Error delivering note (HTTP ${r.status}): ${r.text.slice(0, 300)}`);
       // Honest semantics: it's queued/accepted on the peer's side, not "read".
-      return text(`Note queued for '${partnerName}' — fire-and-forget (it surfaces in the peer's session; there's no read receipt).`);
+      return text(`Note queued for '${partnerName}' — fire-and-forget (it surfaces in the peer's session; there's no read receipt).` + (await pendingNudge()));
     },
   );
 
@@ -89,14 +102,59 @@ export async function startAskServer({ name, partnerName, partnerUrl, askTimeout
       if (r.status !== 200 || !r.json) return text(`Partner '${partnerName}' replied HTTP ${r.status} at ${partnerUrl}.`);
       const h = r.json;
       const extra = h.mode === "relay" ? `, ${h.pending ?? 0} pending` : "";
-      return text(`Partner '${h.name || partnerName}' is ONLINE at ${partnerUrl} — mode=${h.mode || "?"}, answering=${h.answer === true}, version=${h.version || "?"}${extra}.`);
+      return text(`Partner '${h.name || partnerName}' is ONLINE at ${partnerUrl} — mode=${h.mode || "?"}, answering=${h.answer === true}, version=${h.version || "?"}${extra}.` + (await pendingNudge()));
     },
   );
 
   server.registerTool(
     "list_peers",
     { description: "List the peers this session can talk to (self and the partner).", inputSchema: {} },
-    async () => text(`You are '${name}'. Partner '${partnerName}' at ${partnerUrl} (use peer_status for liveness).`),
+    async () => text(`You are '${name}'. Partner '${partnerName}' at ${partnerUrl} (use peer_status for liveness).` + (await pendingNudge())),
+  );
+
+  server.registerTool(
+    "search_peer",
+    {
+      description:
+        "Search the PARTNER's Claude Code chat transcripts — what its sessions actually discussed/decided (not just its code). " +
+        "Use a plain substring or /regex/. Returns matching snippets with their session + project.",
+      inputSchema: { query: z.string(), project: z.string().optional(), limit: z.number().optional() },
+    },
+    async ({ query, project, limit }) => {
+      let r;
+      try { r = await post(`${partnerUrl}/search`, { query, project, limit }, 20_000); }
+      catch (e) { return text(`Error reaching partner '${partnerName}' at ${partnerUrl}: ${netError(e)}.`); }
+      if (r.status === 401) return text(`Error: unauthorized — token mismatch with '${partnerName}'.`);
+      if (r.status !== 200) return text(`Error from partner '${partnerName}' (HTTP ${r.status}): ${r.text.slice(0, 300)}`);
+      let d; try { d = JSON.parse(r.text); } catch { return text("Error: partner returned non-JSON."); }
+      if (d.error) return text(`Error: ${d.error}`);
+      if (d.scope_too_large) return text(`Too much to scan on '${partnerName}' (${d.note}). Narrow with project="<substring>".`);
+      const ms = d.matches || [];
+      if (!ms.length) return text(`No transcript matches for "${query}" on '${partnerName}'.`);
+      return text(ms.map((m) => `• [${m.project}/${m.session.slice(0, 8)} · ${m.role}] ${m.snippet}`).join("\n\n") + (d.truncated ? "\n\n(truncated — refine the query)" : ""));
+    },
+  );
+
+  server.registerTool(
+    "read_peer_chat",
+    {
+      description:
+        "Read the PARTNER's recent chat transcript — its latest session (or one by id), last N messages, or only since " +
+        "its last user prompt. For seeing what the other session actually said/decided.",
+      inputSchema: { session: z.string().optional(), project: z.string().optional(), lastN: z.number().optional(), sinceLastUserPrompt: z.boolean().optional() },
+    },
+    async ({ session, project, lastN, sinceLastUserPrompt }) => {
+      let r;
+      try { r = await post(`${partnerUrl}/read`, { session, project, lastN, sinceLastUserPrompt }, 15_000); }
+      catch (e) { return text(`Error reaching partner '${partnerName}' at ${partnerUrl}: ${netError(e)}.`); }
+      if (r.status === 401) return text(`Error: unauthorized — token mismatch with '${partnerName}'.`);
+      if (r.status !== 200) return text(`Error from partner '${partnerName}' (HTTP ${r.status}): ${r.text.slice(0, 300)}`);
+      let d; try { d = JSON.parse(r.text); } catch { return text("Error: partner returned non-JSON."); }
+      if (d.error) return text(`Error: ${d.error}`);
+      const ms = d.messages || [];
+      if (!ms.length) return text("No messages.");
+      return text(`Session ${String(d.session).slice(0, 8)} (${d.project}):\n\n` + ms.map((m) => `[${m.role}] ${String(m.text).slice(0, 500)}`).join("\n\n"));
+    },
   );
 
   // In-chat answering: only when a local relay is configured.

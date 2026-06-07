@@ -24,7 +24,7 @@ running backend):
 
 | Mode | What it is |
 |---|---|
-| **`ask`** | a **stdio MCP server** that gives an interactive Claude Code session the tools `ask_peer` · `tell_peer` · `peer_status` · `list_peers`. Claude Code spawns it (e.g. via `npx`); it POSTs questions to the partner. |
+| **`ask`** | a **stdio MCP server** that gives an interactive Claude Code session the tools `ask_peer` · `tell_peer` · `peer_status` · `list_peers` · `search_peer` · `read_peer_chat`. Claude Code spawns it (e.g. via `npx`); it POSTs to the partner. |
 | **`answer`** | a long-running **HTTP daemon** that answers the partner's questions by running `claude -p` read-only inside a project. |
 
 The two peers talk **directly** over their ports — no central broker, no database.
@@ -63,7 +63,7 @@ it; restart the session and the tools appear:
 
 ```jsonc
 { "mcpServers": { "bridge": {
-    "command": "npx", "args": ["-y", "github:ajaysavaliya8/claude-bridge#v0.7.0", "ask", "--partner-port", "8082"]
+    "command": "npx", "args": ["-y", "github:ajaysavaliya8/claude-bridge#v0.8.0", "ask", "--partner-port", "8082"]
 } } }
 ```
 
@@ -140,6 +140,20 @@ Say e.g. *"check peer questions"* in your session → Claude calls
 `incoming_questions` and answers each with `answer_incoming`. Raise
 `ASK_TIMEOUT_SECONDS` on the asker if answers take a while (a human is in the loop).
 
+## Search / read the partner's chats
+
+Beyond asking about its *code*, you can see what the partner's Claude sessions
+actually discussed/decided — **across machines**, over the bridge:
+
+- `search_peer("auth flow")` — grep the partner's transcripts (substring or
+  `/regex/`); returns snippets with session + project. Narrow with `project="…"`.
+- `read_peer_chat({ lastN: 20 })` — read the partner's latest session (or one by
+  `session` id): last N messages, or only `sinceLastUserPrompt`.
+
+Read-only, bounded by a 200 MB scan cap. (Also: when a peer both asks and runs a
+relay, other tool results carry a `📥 N pending` nudge so incoming questions get
+noticed without a manual "check peer questions".)
+
 ## Configuration
 
 **No config file is required.** Everything is a flag. A few environment variables
@@ -181,7 +195,7 @@ editable value) and click **Reconnect** in the MCP panel — or re-run
 ```jsonc
 // .mcp.json — edit "8082", save, then hit Reconnect
 { "mcpServers": { "bridge": {
-    "command": "npx", "args": ["-y", "github:ajaysavaliya8/claude-bridge#v0.7.0", "ask", "--partner-port", "8082"]
+    "command": "npx", "args": ["-y", "github:ajaysavaliya8/claude-bridge#v0.8.0", "ask", "--partner-port", "8082"]
 } } }
 ```
 
@@ -233,7 +247,7 @@ files, run shell, or hang the peer. Errors returned to the partner are redacted
 (local stderr/paths stay local). Keep both hosts trusted; never expose ports
 publicly.
 
-> **Pin a version.** `npx -y github:ajaysavaliya8/claude-bridge#v0.7.0` (and the
+> **Pin a version.** `npx -y github:ajaysavaliya8/claude-bridge#v0.8.0` (and the
 > plugin) pin a tag so every spawn runs the same build — an unpinned `…/claude-bridge`
 > can pull a different commit each time.
 
